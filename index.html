@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>五行能量饰品馆 · 卖家中心</title>
+<link rel="stylesheet" href="css/style.css?v=202607312200">
+</head>
+<body>
+<!-- 登录页 -->
+<div id="loginPage" class="login-page">
+  <div class="login-card">
+    <div class="login-logo">☯</div>
+    <h2>五行能量饰品馆</h2>
+    <p class="login-sub">卖家中心</p>
+    <input type="text" id="loginAccount" class="login-input" placeholder="账号" autocomplete="off">
+    <input type="password" id="loginPwd" class="login-input" placeholder="密码" autocomplete="off">
+    <button id="loginBtn" class="login-submit">登 录</button>
+    <p id="loginError" class="login-error"></p>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="appPage" class="app-page" style="display:none;">
+  <!-- 侧边栏 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-icon">☯</span>
+      <span class="brand-text">卖家中心</span>
+    </div>
+    <nav class="sidebar-nav" id="sidebarNav">
+      <a class="nav-item active" data-page="dashboard">
+        <span class="nav-icon">📊</span> 数据看板
+      </a>
+      <a class="nav-item" data-page="orders">
+        <span class="nav-icon">📦</span> 订单管理
+      </a>
+      <a class="nav-item" data-page="products">
+        <span class="nav-icon">💎</span> 商品管理
+      </a>
+      <a class="nav-item" data-page="users">
+        <span class="nav-icon">👥</span> 用户管理
+      </a>
+      <a class="nav-item" data-page="dbview">
+        <span class="nav-icon">🗄️</span> 数据库查看
+      </a>
+    </nav>
+    <div class="sidebar-user">
+      <div class="user-avatar" id="userAvatar">管</div>
+      <span id="userName">管理员</span>
+      <span class="logout-link" id="logoutBtn">退出</span>
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main class="main-content" id="mainContent">
+    <!-- 数据看板 -->
+    <section id="page-dashboard" class="page-section">
+      <div class="page-header">
+        <div class="ph-left">
+          <h1>数据看板</h1>
+          <span id="dashTime" class="header-time"></span>
+          <button id="dashRefreshBtn" class="refresh-btn" title="刷新最新统计数据">刷新</button>
+        </div>
+      </div>
+
+      <!-- 今日数据 -->
+      <div class="stat-block">
+        <div class="block-title">今日数据</div>
+        <div class="stat-cards">
+          <div class="stat-card">
+            <div class="stat-label">订单数</div><div class="stat-val" id="statTodayOrders">--</div><div class="stat-sub">实时统计</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">销售额</div><div class="stat-val money" id="statTodaySales">--</div><div class="stat-sub">较昨日 <span id="statSalesDiff">--</span></div>
+          </div>
+          <div class="stat-card profit-card" data-profit="today">
+            <button class="profit-toggle" title="查看利润构成" onclick="showProfitDetail('today')">明细 ▾</button>
+            <div class="stat-label">利润</div><div class="stat-val" id="statTodayProfit">--</div><div class="stat-sub">较昨日 <span id="statProfitDiff">--</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">新用户数</div><div class="stat-val" id="statTodayNewUsers">--</div><div class="stat-sub">今日注册</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">DIY数（保存/购买）</div><div class="stat-val" id="statTodayDiy">--</div><div class="stat-sub">保存 <span id="statTodayDiySaved">--</span> / 购买 <span id="statTodayDiyBought">--</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 近30天数据 -->
+      <div class="stat-block">
+        <div class="block-title">近30天数据</div>
+        <div class="stat-cards">
+          <div class="stat-card">
+            <div class="stat-label">订单数</div><div class="stat-val" id="statM30Orders">--</div><div class="stat-sub">实时统计</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">销售额</div><div class="stat-val money" id="statM30Sales">--</div><div class="stat-sub">较上期 <span id="statSalesGrowth">--</span></div>
+          </div>
+          <div class="stat-card profit-card" data-profit="m30">
+            <button class="profit-toggle" title="查看利润构成" onclick="showProfitDetail('m30')">明细 ▾</button>
+            <div class="stat-label">利润</div><div class="stat-val" id="statM30Profit">--</div><div class="stat-sub">较上期 <span id="statProfitGrowth">--</span></div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">新用户数</div><div class="stat-val" id="statM30NewUsers">--</div><div class="stat-sub">近30天注册</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">DIY数（保存/购买）</div><div class="stat-val" id="statM30Diy">--</div><div class="stat-sub">保存 <span id="statM30DiySaved">--</span> / 购买 <span id="statM30DiyBought">--</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 历史累计 -->
+      <div class="stat-block">
+        <div class="block-title">历史累计</div>
+        <div class="stat-cards">
+          <div class="stat-card">
+            <div class="stat-label">累计订单数</div><div class="stat-val" id="statHCOrders">--</div><div class="stat-sub">全部历史</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">累计销售额</div><div class="stat-val money" id="statHCSales">--</div><div class="stat-sub">含待发货、运输中、已完成</div>
+          </div>
+          <div class="stat-card profit-card" data-profit="hc">
+            <button class="profit-toggle" title="查看利润构成" onclick="showProfitDetail('hc')">明细 ▾</button>
+            <div class="stat-label">累计利润</div><div class="stat-val" id="statHCProfit">--</div><div class="stat-sub">销售额-货款-快递费</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">用户总数</div><div class="stat-val" id="statUserTotal">--</div><div class="stat-sub">注册用户</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">DIY数（保存/购买）</div><div class="stat-val" id="statHCDiy">--</div><div class="stat-sub">保存 <span id="statHCDiySaved">--</span> / 购买 <span id="statHCDiyBought">--</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 待处理订单（待发货 / 待退款）仅显示数量，点击跳转 -->
+      <div class="pending-module">
+        <div class="module-head">
+          <h3>待处理订单</h3>
+          <span class="module-sub">需及时跟进的发货与售后，点击查看明细</span>
+        </div>
+        <div class="pending-counts">
+          <div class="pending-count-box" data-status="待发货">
+            <div class="pc-num warn" id="pmCntUnship">0</div>
+            <div class="pc-label">待发货</div>
+          </div>
+          <div class="pending-count-box" data-status="待退款">
+            <div class="pc-num danger" id="pmCntRefund">0</div>
+            <div class="pc-label">待退款</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 销售趋势折线图 -->
+      <div class="chart-card" id="trendChartWrap">
+        <div class="chart-head">
+          <h3>销售趋势</h3>
+          <div class="chart-toggle">
+            <button class="chart-range-btn active" data-range="day">按天（近30天）</button>
+            <button class="chart-range-btn" data-range="month">按月（近12个月）</button>
+          </div>
+        </div>
+        <div class="chart-legend" id="trendLegend"></div>
+        <canvas id="trendChart" class="trend-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- 订单管理 -->
+    <section id="page-orders" class="page-section" style="display:none;">
+      <div class="page-header"><h1>订单管理</h1></div>
+      <!-- Tab -->
+      <div class="tab-bar" id="orderTabs">
+        <button class="tab-btn active" data-tab="pending">待发货订单</button>
+        <button class="tab-btn" data-tab="history">历史订单</button>
+      </div>
+      <!-- 待发货 -->
+      <div id="orderPending">
+        <div class="sub-tab-bar">
+          <button class="sub-tab-btn active" data-sub="product">成品 <span class="sub-count" id="subCntProduct"></span></button>
+          <button class="sub-tab-btn" data-sub="diy">DIY <span class="sub-count" id="subCntDiy"></span></button>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-green" id="printAllBtn">打印所有快递面单</button>
+          <span class="toolbar-info" id="pendingCount">共 0 笔待发货</span>
+        </div>
+        <div class="order-list" id="pendingList">
+          <div class="empty-state">暂无待发货订单</div>
+        </div>
+      </div>
+      <!-- 历史订单 -->
+      <div id="orderHistory" style="display:none;">
+        <div class="toolbar filter-bar">
+          <div class="filter-group history-date-group">
+            <div class="date-input-wrap">
+              <input type="date" id="historyStart" class="filter-date" placeholder="yyyy/mm/dd">
+            </div>
+            <span class="date-sep">至</span>
+            <div class="date-input-wrap">
+              <input type="date" id="historyEnd" class="filter-date" placeholder="yyyy/mm/dd">
+            </div>
+            <button class="btn btn-sm btn-outline" data-range="today">今日</button>
+            <button class="btn btn-sm btn-outline" data-range="30d">本月</button>
+            <button class="btn btn-sm btn-outline active" data-range="all">全部</button>
+          </div>
+          <div class="filter-group">
+            <select id="historyStatus" class="filter-select">
+              <option value="">全部状态</option>
+              <option value="待发货">待发货</option>
+              <option value="运输中">运输中</option>
+              <option value="已完成">已完成</option>
+              <option value="已取消">已取消</option>
+              <option value="待退款">待退款</option>
+              <option value="已退款">已退款</option>
+            </select>
+            <input type="text" id="historyKeyword" class="filter-input" placeholder="搜索订单号/用户名...">
+          </div>
+        </div>
+        <div class="toolbar-info" id="historyTotal"></div>
+        <div class="order-list" id="historyList">
+          <div class="empty-state">暂无历史订单</div>
+        </div>
+        <div class="pagination" id="historyPager"></div>
+      </div>
+    </section>
+
+    <!-- 商品管理 -->
+    <section id="page-products" class="page-section" style="display:none;">
+      <div class="page-header">
+        <h1>商品管理</h1>
+        <div class="header-actions">
+          <button class="btn btn-outline" id="addProductBtn">+ 新增商品</button>
+          <button class="btn btn-outline" id="importDocBtn">📥 批量上传</button>
+          <a class="btn btn-link" id="gotoTaskHistoryBtn" href="#taskhistory">📋 上传历史</a>
+        </div>
+      </div>
+      <div class="toolbar filter-bar" style="justify-content: flex-start;">
+        <div class="filter-group">
+          <select id="prodType" class="filter-select">
+            <option value="">全部类型</option>
+            <option value="product">成品饰品</option>
+            <option value="material">DIY材料</option>
+          </select>
+          <select id="prodCategory" class="filter-select">
+            <option value="">全部分类</option>
+          </select>
+          <select id="prodStatus" class="filter-select">
+            <option value="">全部状态</option>
+            <option value="已添加">已添加</option>
+            <option value="在售">在售</option>
+            <option value="已下架">已下架</option>
+          </select>
+          <input type="text" id="prodKeyword" class="filter-input" placeholder="搜索商品名...">
+        </div>
+        <div class="filter-group">
+          <button class="btn btn-sm btn-outline" id="batchShelfBtn">批量上传</button>
+          <button class="btn btn-sm btn-outline" id="batchOffBtn">批量下架</button>
+          <button class="btn btn-sm btn-outline" id="batchStockBtn">批量改库存</button>
+          <button class="btn btn-sm btn-outline" id="batchPriceBtn">批量改价格</button>
+        </div>
+      </div>
+      <div class="toolbar"><span class="toolbar-info" id="prodTotalText"></span></div>
+      <div class="table-wrap">
+        <table class="data-table" id="productTable">
+          <thead>
+            <tr>
+              <th style="width:40px"><input type="checkbox" id="selectAll"></th>
+              <th>商品名称</th>
+              <th style="width:80px">类型</th>
+              <th style="width:80px">分类</th>
+              <th style="width:80px">价格</th>
+              <th style="width:80px">成本价</th>
+              <th style="width:60px">库存</th>
+              <th style="width:70px">状态</th>
+              <th style="width:100px">操作</th>
+            </tr>
+          </thead>
+          <tbody id="productBody">
+            <tr><td colspan="9" class="empty-state">暂无商品数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="productPager"></div>
+    </section>
+
+    <!-- 用户管理 -->
+    <section id="page-users" class="page-section" style="display:none;">
+      <div class="page-header"><h1>用户管理</h1></div>
+      <div class="tab-bar" id="userTabs">
+        <button class="tab-btn active" data-tab="buyer">买家用户</button>
+        <button class="tab-btn" data-tab="supplier">供应商</button>
+        <button class="tab-btn" data-tab="admin">管理员</button>
+      </div>
+
+      <!-- 买家用户 -->
+      <div id="userBuyer">
+        <div class="toolbar"><span class="toolbar-info" id="buyerTotal"></span></div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr>
+              <th>用户ID（微信openid）</th><th>用户昵称</th><th>注册时间（首次登录时间）</th>
+              <th>最近登录时间</th><th>DIY数</th><th>购买数</th>
+            </tr></thead>
+            <tbody id="buyerBody"><tr><td colspan="6" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 供应商 -->
+      <div id="userSupplier" style="display:none;">
+        <div class="toolbar">
+          <button class="btn btn-primary" id="addSupplierBtn">+ 新增供应商</button>
+          <span class="toolbar-info" id="supplierTotal"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr>
+              <th>供应商ID</th><th>供应商名称</th><th>登录账号</th><th>登录密码</th>
+              <th>首次登录时间</th><th>最新登录时间</th><th>操作</th>
+            </tr></thead>
+            <tbody id="supplierBody"><tr><td colspan="7" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 管理员 -->
+      <div id="userAdmin" style="display:none;">
+        <div class="toolbar">
+          <button class="btn btn-primary" id="addAdminBtn">+ 新增管理员</button>
+          <span class="toolbar-info" id="adminTotal"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr>
+              <th>账号名</th><th>密码</th><th>操作</th>
+            </tr></thead>
+            <tbody id="adminBody"><tr><td colspan="3" class="empty-state">加载中...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 数据库查看 -->
+    <section id="page-dbview" class="page-section" style="display:none;">
+      <div class="page-header">
+        <div class="ph-left">
+          <h1>数据库查看</h1>
+          <span class="header-time">实时展示 13 个集合的数据</span>
+        </div>
+      </div>
+      <div class="dbview-toolbar">
+        <select id="dbviewCollection" class="filter-select"></select>
+        <span id="dbviewCount" class="dbview-count"></span>
+      </div>
+      <div class="dbview-table-wrap">
+        <table class="dbview-table" id="dbviewTable">
+          <thead><tr id="dbviewHead"></tr></thead>
+          <tbody id="dbviewBody"><tr><td class="empty-state">请选择集合</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 上传历史 -->
+    <section id="page-taskhistory" class="page-section" style="display:none;">
+      <div class="page-header">
+        <h1>上传历史</h1>
+        <div class="header-actions">
+          <button class="btn btn-outline" id="refreshTaskBtn">刷新</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table" id="taskTable">
+          <thead>
+            <tr>
+              <th>任务ID</th>
+              <th>提交时间</th>
+              <th>操作人</th>
+              <th>上传文件</th>
+              <th>参数</th>
+              <th>结束时间</th>
+              <th>状态</th>
+              <th>日志/参数</th>
+            </tr>
+          </thead>
+          <tbody id="taskBody">
+            <tr><td colspan="8" class="empty-state">暂无上传任务</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Modal 通用弹窗 -->
+<div id="modalOverlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box" id="modalBox">
+    <div class="modal-header"><span id="modalTitle"></span><button class="modal-close" id="modalClose">✕</button></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer" id="modalFooter"></div>
+  </div>
+</div>
+
+<!-- 商品编辑弹窗 -->
+<div id="prodModalOverlay" class="modal-overlay" style="display:none;">
+  <div class="modal-box modal-lg">
+    <div class="modal-header"><span id="prodModalTitle">新增/编辑商品</span><button class="modal-close" id="prodModalClose">✕</button></div>
+    <div class="modal-body">
+      <form id="prodForm">
+        <input type="hidden" id="pfId">
+        <input type="hidden" id="pfType">
+        <div class="form-row">
+          <label>商品名称</label><input type="text" id="pfName" class="form-input" required>
+        </div>
+        <div class="form-row">
+          <label>类型</label><select id="pfProdType" class="form-input"><option value="product">成品饰品</option><option value="material">DIY材料</option></select>
+        </div>
+        <div class="form-row">
+          <label>分类</label><select id="pfCategory" class="form-input"></select>
+        </div>
+        <div class="form-row">
+          <label>价格 (¥)</label><input type="number" id="pfPrice" class="form-input" step="0.01" min="0" required>
+        </div>
+        <div class="form-row">
+          <label>成本价 (¥)</label><input type="number" id="pfCost" class="form-input" step="0.01" min="0">
+        </div>
+        <div class="form-row">
+          <label>库存</label><input type="number" id="pfStock" class="form-input" min="0" required>
+        </div>
+        <div class="form-row">
+          <label>标语</label><input type="text" id="pfTagline" class="form-input">
+        </div>
+        <div class="form-row" style="align-items:flex-start;">
+          <label style="padding-top:8px;">图片URL</label>
+          <div style="flex:1;">
+            <textarea id="pfImages" class="form-input" rows="4" placeholder="每行一个图片URL，支持多张；第一张自动作为主图"></textarea>
+            <div id="pfImagesPreview" class="form-imgs-preview"></div>
+          </div>
+        </div>
+        <div class="form-row" id="pfListImagesRow" style="align-items:flex-start;display:none;">
+          <label style="padding-top:8px;">列表图</label>
+          <div style="flex:1;">
+            <textarea id="pfListImages" class="form-input" rows="3" placeholder="材料在商品列表中显示的图片URL，每行一个"></textarea>
+            <div id="pfListImagesPreview" class="form-imgs-preview"></div>
+          </div>
+        </div>
+        <div class="form-row" id="pfDisplayImagesRow" style="align-items:flex-start;display:none;">
+          <label style="padding-top:8px;">展示图</label>
+          <div style="flex:1;">
+            <textarea id="pfDisplayImages" class="form-input" rows="3" placeholder="材料在DIY展示区显示的图片URL，每行一个"></textarea>
+            <div id="pfDisplayImagesPreview" class="form-imgs-preview"></div>
+
+            <!-- AI 图自动处理面板：把 AI 透明 PNG 标准化为 DIY 展示图 -->
+            <div class="ai-process-box">
+              <div class="ai-process-title">🤖 AI 图自动处理（透明 PNG → 标准化展示图）</div>
+              <div class="ai-process-grid">
+                <div>
+                  <label>上传 AI 透明图</label>
+                  <input type="file" id="aiImgFile" accept="image/png" class="form-input">
+                </div>
+                <div>
+                  <label>横向真实尺寸(mm)</label>
+                  <input type="number" id="aiRealW" class="form-input" step="0.1" min="0" placeholder="realWmm">
+                </div>
+                <div>
+                  <label>纵向真实尺寸(mm)</label>
+                  <input type="number" id="aiRealH" class="form-input" step="0.1" min="0" placeholder="realHmm">
+                </div>
+                <div>
+                  <label>穿线方向</label>
+                  <select id="aiThreadDir" class="form-input">
+                    <option value="left_right">left_right（左右穿）</option>
+                    <option value="up_down">up_down（上下穿）</option>
+                    <option value="front_back">front_back（正面挂）</option>
+                  </select>
+                </div>
+                <div>
+                  <label>沿穿线厚度(mm)</label>
+                  <input type="number" id="aiThickness" class="form-input" step="0.1" min="0" placeholder="front_back 必填">
+                </div>
+                <div>
+                  <label>留白(px)</label>
+                  <input type="number" id="aiPadding" class="form-input" step="1" min="0" value="20">
+                </div>
+              </div>
+              <div class="ai-process-actions">
+                <button type="button" class="btn btn-primary" id="aiProcessBtn">处理并填入展示图</button>
+                <span id="aiProcessMsg" class="ai-process-msg"></span>
+              </div>
+              <div id="aiProcessPreview" class="ai-process-preview"></div>
+              <p class="ai-process-tip">说明：处理后返回「卡片版（带留白）」与「装配版（零留白）」。展示图填入卡片版；若需装配版可二次处理选 assembly。非透明背景会被拒绝并提示重新抠图。</p>
+            </div>
+          </div>
+        </div>
+        <div class="form-row">
+          <label>状态</label>
+          <select id="pfStatus" class="form-input">
+            <option value="已添加">已添加</option>
+            <option value="在售">在售</option>
+            <option value="已下架">已下架</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>颜色名</label><input type="text" id="pfColorName" class="form-input" placeholder="如 帝王砂绿">
+        </div>
+        <div class="form-row">
+          <label>颜色值</label><input type="text" id="pfColorHex" class="form-input" placeholder="#7BA05B">
+        </div>
+        <div class="form-row">
+          <label>规格/尺寸</label><input type="text" id="pfSpecSize" class="form-input" placeholder="如 6mm / 6mm*10mm / 17cm">
+        </div>
+        <div class="form-row" id="pfThreadRow">
+          <label>穿线宽度(mm)</label><input type="number" id="pfThreadWidth" class="form-input" step="0.1" min="0" placeholder="材料专用">
+        </div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" id="prodModalCancel">取消</button>
+      <button class="btn btn-primary" id="prodModalSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>window.__MOCK__ = false;</script>
+<!-- 真实后端域名：在 CloudBase 控制台 → adminLogin 的 HTTP 网关路由里复制，格式为 https://<环境ID>.ap-shanghai.app.tcloudbase.com，不要带 /adminLogin（前端会自动拼接） -->
+<script>window.__API_BASE__ = 'https://cloud1-d8gspzw1m242c79ce-1460636638.ap-shanghai.app.tcloudbase.com';</script>
+<script src="js/api.js?v=2026080301"></script>
+<script src="js/utils.js?v=202607312200"></script>
+<script src="js/dashboard.js?v=202607312200"></script>
+<script src="js/orders.js?v=202607312200"></script>
+<script src="js/products.js?v=2026080301"></script>
+<script src="js/users.js?v=202607312200"></script>
+<script src="js/dbview.js?v=2026080301"></script>
+<script src="js/taskhistory.js?v=2026080201"></script>
+<script src="js/app.js?v=2026080201"></script>
+</body>
+</html>
