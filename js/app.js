@@ -89,6 +89,11 @@ async function navigateTo(page) {
   if (page === currentPage) return; // 已在该页，避免重复渲染/重复加载
   setSidebarActive(page);
 
+  // 离开上传历史页时停止自动轮询
+  if (currentPage === 'taskhistory' && page !== 'taskhistory' && typeof stopTaskPolling === 'function') {
+    stopTaskPolling();
+  }
+
   // 隐藏所有页面
   $$('.page-section').forEach(s => s.style.display = 'none');
   const target = $('#page-' + page);
@@ -102,7 +107,7 @@ async function navigateTo(page) {
     initOrders();
     await reloadOrders();
   }   else if (page === 'products') {
-    initProducts();
+    await initProducts();
     await loadProducts();
   } else if (page === 'users') {
     initUsers();

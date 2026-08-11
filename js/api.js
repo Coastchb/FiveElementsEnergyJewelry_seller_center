@@ -34,12 +34,18 @@ async function apiCall(fnName, data = {}) {  if (MOCK) return mockCall(fnName, d
     return json.data;
   }
   // 其余接口统一通过网关转发
+  const url = `${API_BASE}/adminApiGateway`;
+  console.log('[apiCall] 真实环境请求 URL:', url, 'payload:', JSON.stringify({ fnName, data, _adminToken: AUTH_TOKEN }));
   const res = await fetch(`${API_BASE}/adminApiGateway`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fnName, data, _adminToken: AUTH_TOKEN }),
   });
-  const json = await res.json();
+  console.log('[apiCall] 响应状态:', res.status);
+  const text = await res.text();
+  console.log('[apiCall] 响应文本:', text);
+  let json;
+  try { json = JSON.parse(text); } catch (e) { throw new Error('响应非 JSON: ' + text.slice(0, 200)); }
   if (json.code !== 0) throw new Error(json.message || '请求失败');
   return json.data;
 }
@@ -138,27 +144,27 @@ function initMockData() {
 
   const orders = [
       { orderId: 'OD20260720001', type: 'product', status: '待发货', seqTail: '0001',
-        goodsName: '五行转运红绳手链', qty: 2, price: 168, cost: 120, createdAt: now - 3600000,
+        supplierId: 'S001', supplierName: '灵石工坊', goodsName: '五行转运红绳手串', qty: 2, price: 168, cost: 120, createdAt: now - 3600000,
         nickname: '星辰大海', address: { name: '张先生', phone: '138****5678', address: '广东省深圳市南山区科技园路1号' },
-        waybillPrinted: false, diyMaterials: null, buyerRemark: '请在工作日送达', sellerRemark: '' },
+        waybillPrinted: false, diyMaterials: null, buyerRemark: '请在工作日送达', sellerRemark: '', senderAddress: '广东省广州市荔湾区逢源街道华林国际C馆二楼C区2151-1档口' },
       { orderId: 'OD20260720002', type: 'diy', status: '待发货', seqTail: '0002',
-        goodsName: '自定义DIY手串·幸运石', qty: 1, price: 258, cost: 95, createdAt: now - 7200000,
+        supplierId: 'S002', supplierName: '晶彩饰品', goodsName: '自定义DIY手串·幸运石', qty: 1, price: 258, cost: 95, createdAt: now - 7200000,
         nickname: '月光宝盒', address: { name: '李女士', phone: '159****1234', address: '北京市朝阳区望京SOHO' },
-        waybillPrinted: true, diyMaterials: '紫水晶×2, 白水晶×1, 月光石×3, 925银饰×1', buyerRemark: '', sellerRemark: '已与用户确认配石' },
+        waybillPrinted: true, diyMaterials: '紫水晶×2, 白水晶×1, 月光石×3, 925银饰×1', buyerRemark: '', sellerRemark: '已与用户确认配石', senderAddress: '广东省深圳市罗湖区水贝一路珠宝批发市场A区B08' },
       { orderId: 'OD20260719003', type: 'product', status: '待发货', seqTail: '0003',
-        goodsName: '紫水晶能量项链', qty: 1, price: 398, cost: 150, createdAt: now - day,
+        supplierId: 'S001', supplierName: '灵石工坊', goodsName: '紫水晶能量项链', qty: 1, price: 398, cost: 150, createdAt: now - day,
         nickname: '清风徐来', address: { name: '王先生', phone: '186****9012', address: '上海市浦东新区陆家嘴环路100号' },
-        waybillPrinted: false, diyMaterials: null, buyerRemark: '', sellerRemark: '' },
+        waybillPrinted: false, diyMaterials: null, buyerRemark: '', sellerRemark: '', senderAddress: '广东省广州市荔湾区逢源街道华林国际C馆二楼C区2151-1档口' },
       { orderId: 'OD20260719004', type: 'diy', status: '待发货', seqTail: '0004',
-        goodsName: 'DIY·守护之环', qty: 1, price: 320, cost: 110, createdAt: now - day - 3600000,
+        supplierId: 'S002', supplierName: '晶彩饰品', goodsName: 'DIY·守护之环', qty: 1, price: 320, cost: 110, createdAt: now - day - 3600000,
         nickname: '花间一壶酒', address: { name: '赵女士', phone: '177****3456', address: '浙江省杭州市西湖区文三路' },
-        waybillPrinted: false, diyMaterials: '黑曜石×2, 红玛瑙×2, 黄水晶×1, 菩提根×1', buyerRemark: '希望偏红色系', sellerRemark: '' },
+        waybillPrinted: false, diyMaterials: '黑曜石×2, 红玛瑙×2, 黄水晶×1, 菩提根×1', buyerRemark: '希望偏红色系', sellerRemark: '', senderAddress: '广东省深圳市罗湖区水贝一路珠宝批发市场A区B08' },
       { orderId: 'OD20260718005', type: 'product', status: '待发货', seqTail: '0005',
-        goodsName: '招财黄水晶手链', qty: 3, price: 128, cost: 135, createdAt: now - day * 2,
+        supplierId: 'S001', supplierName: '灵石工坊', goodsName: '招财黄水晶手串', qty: 3, price: 128, cost: 135, createdAt: now - day * 2,
         nickname: '云淡风轻', address: { name: '孙先生', phone: '133****7890', address: '广东省广州市天河区珠江新城' },
-        waybillPrinted: true, diyMaterials: null, buyerRemark: '', sellerRemark: '' },
+        waybillPrinted: true, diyMaterials: null, buyerRemark: '', sellerRemark: '', senderAddress: '广东省广州市荔湾区逢源街道华林国际C馆二楼C区2151-1档口' },
       { orderId: 'OD20260717006', type: 'product', status: '运输中', seqTail: '0006',
-        goodsName: '五行转运红绳手链', qty: 1, price: 168, cost: 60, createdAt: now - day * 3,
+        goodsName: '五行转运红绳手串', qty: 1, price: 168, cost: 60, createdAt: now - day * 3,
         shippedAt: now - day * 2.5, nickname: '星辰大海',
         address: { name: '张先生', phone: '138****5678', address: '广东省深圳市南山区科技园路1号' },
         expressCompany: '中通快递', waybillNo: 'ZT77220188391234', signed: false, intercepted: false,
@@ -178,15 +184,15 @@ function initMockData() {
       { orderId: 'OD20260711011', type: 'product', status: '待退款', seqTail: '0011',
         goodsName: '紫水晶能量项链', qty: 1, price: 398, cost: 150, createdAt: now - day * 9,
         nickname: '清风徐来', address: { name: '王先生', phone: '186****9012', address: '上海市浦东新区陆家嘴环路100号' },
-        expressCompany: '顺丰速运', waybillNo: 'SF1043829910999', signed: false, intercepted: true, interceptInfo: '已向顺丰发起拦截，包裹将在网点退回',
+        expressCompany: '顺丰速运', waybillNo: 'SF1043829910999', signed: false,
         waybillPrinted: false, diyMaterials: null, buyerRemark: '想退货退款', sellerRemark: '已与用户协商，待寄回后退款' },
       { orderId: 'OD20260712009', type: 'product', status: '已退款', seqTail: '0009', refunded: true,
-        goodsName: '五行转运红绳手链', qty: 1, price: 168, costPrice: 60, createdAt: now - day * 8,
+        goodsName: '五行转运红绳手串', qty: 1, price: 168, costPrice: 60, createdAt: now - day * 8,
         completedAt: now - day * 7.5, nickname: '云淡风轻',
         address: { name: '孙先生', phone: '133****7890', address: '广东省广州市天河区珠江新城' },
         waybillPrinted: false, diyMaterials: null, buyerRemark: '不想要了', sellerRemark: '用户主动取消，已退款' },
       { orderId: 'OD20260710010', type: 'product', status: '已完成', seqTail: '0010',
-        goodsName: '招财黄水晶手链', qty: 2, price: 128, costPrice: 90, createdAt: now - day * 10,
+        goodsName: '招财黄水晶手串', qty: 2, price: 128, costPrice: 90, createdAt: now - day * 10,
         shippedAt: now - day * 9, completedAt: new Date('2026-07-14').getTime(), nickname: '花间一壶酒',
         address: { name: '赵女士', phone: '177****3456', address: '浙江省杭州市西湖区文三路' },
       expressCompany: '中通快递', waybillNo: 'ZT77220188395555', signed: true, intercepted: false,
@@ -202,22 +208,23 @@ function initMockData() {
       },
       orders,
       products: [
-      { productId: 'P001', productName: '五行转运红绳手链', type: 'product', categoryId: 'bracelet', categoryName: '手链', price: 168, costPrice: 60, stock: 45, status: '在售', tagline: '转运辟邪，守护平安', images: [], colorName: '红', colorHex: '#C0392B', specSize: '17cm', addTime: now - day * 30, updateTime: now - day * 30 },
+      { productId: 'P001', productName: '五行转运红绳手串', type: 'product', categoryId: 'beaded', categoryName: '手串', price: 168, costPrice: 60, stock: 45, status: '在售', tagline: '转运辟邪，守护平安', images: [], colorName: '红', colorHex: '#C0392B', specSize: '17cm', addTime: now - day * 30, updateTime: now - day * 30 },
       { productId: 'P002', productName: '紫水晶能量项链', type: 'product', categoryId: 'necklace', categoryName: '项链', price: 398, costPrice: 150, stock: 12, status: '在售', tagline: '提升智慧，平静心灵', images: [], colorName: '紫', colorHex: '#9B6BC9', specSize: '45cm', addTime: now - day * 28, updateTime: now - day * 28 },
-      { productId: 'P003', productName: '招财黄水晶手链', type: 'product', categoryId: 'bracelet', categoryName: '手链', price: 128, costPrice: 45, stock: 88, status: '在售', tagline: '招财纳福，财源广进', images: [], colorName: '黄', colorHex: '#F4C430', specSize: '16cm', addTime: now - day * 26, updateTime: now - day * 26 },
-      { productId: 'P004', productName: '月光石耳环', type: 'product', categoryId: 'earrings', categoryName: '耳饰', price: 258, costPrice: 90, stock: 30, status: '在售', tagline: '温润如玉，优雅气质', images: [], colorName: '白', colorHex: '#F5F5F5', specSize: '可调', addTime: now - day * 24, updateTime: now - day * 24 },
+      { productId: 'P003', productName: '招财黄水晶手串', type: 'product', categoryId: 'beaded', categoryName: '手串', price: 128, costPrice: 45, stock: 88, status: '在售', tagline: '招财纳福，财源广进', images: [], colorName: '黄', colorHex: '#F4C430', specSize: '16cm', addTime: now - day * 26, updateTime: now - day * 26 },
+      { productId: 'P004', productName: '月光石手串', type: 'product', categoryId: 'beaded', categoryName: '手串', price: 258, costPrice: 90, stock: 30, status: '在售', tagline: '温润如玉，优雅气质', images: [], colorName: '白', colorHex: '#F5F5F5', specSize: '可调', addTime: now - day * 24, updateTime: now - day * 24 },
       { productId: 'P005', productName: '白虎尊者·和田玉吊坠', type: 'product', categoryId: 'necklace', categoryName: '项链', price: 688, costPrice: 300, stock: 5, status: '在售', tagline: '辟邪镇宅，权威守护', images: [], colorName: '白绿', colorHex: '#3CB371', specSize: '3cm', addTime: now - day * 22, updateTime: now - day * 22 },
-      { productId: 'P006', productName: '绿松石手串', type: 'product', categoryId: 'bracelet', categoryName: '手链', price: 328, costPrice: 120, stock: 0, status: '已下架', tagline: '成功之石，幸运之钥', images: [], colorName: '蓝绿', colorHex: '#2E8B57', specSize: '18cm', addTime: now - day * 20, updateTime: now - day * 19 },
-      { productId: 'M001', productName: '天然紫水晶8mm圆珠', type: 'material', categoryId: 'crystal', categoryName: '水晶', price: 28, costPrice: 8, stock: 200, status: '在售', tagline: '单颗售卖', images: [], listImages: [], displayImages: [], colorName: '紫', colorHex: '#9B6BC9', specSize: '8mm', threadWidthMm: 8, addTime: now - day * 18, updateTime: now - day * 18 },
-      { productId: 'M002', productName: '黑曜石6mm圆珠', type: 'material', categoryId: 'crystal', categoryName: '水晶', price: 18, costPrice: 5, stock: 350, status: '在售', tagline: '单颗售卖', images: [], listImages: [], displayImages: [], colorName: '黑', colorHex: '#1A1A1A', specSize: '6mm', threadWidthMm: 6, addTime: now - day * 16, updateTime: now - day * 16 },
-      { productId: 'M003', productName: '925银莲花隔珠', type: 'material', categoryId: 'silver', categoryName: '银饰', price: 35, costPrice: 10, stock: 120, status: '在售', tagline: '精致银饰，提升质感', images: [], listImages: [], displayImages: [], colorName: '银', colorHex: '#C0C0C0', specSize: '6mm', threadWidthMm: 6, addTime: now - day * 14, updateTime: now - day * 14 },
-      { productId: 'M004', productName: '红玛瑙10mm圆珠', type: 'material', categoryId: 'crystal', categoryName: '水晶', price: 22, costPrice: 6, stock: 0, status: '已下架', tagline: '单颗售卖', images: [], listImages: [], displayImages: [], colorName: '红', colorHex: '#C0392B', specSize: '10mm', threadWidthMm: 10, addTime: now - day * 12, updateTime: now - day * 11 },
-      { productId: 'M005', productName: '菩提根12mm圆珠', type: 'material', categoryId: 'wood', categoryName: '木质', price: 15, costPrice: 4, stock: 500, status: '在售', tagline: '天然菩提，禅意十足', images: [], listImages: [], displayImages: [], colorName: '米白', colorHex: '#F0EAD6', specSize: '12mm', threadWidthMm: 12, addTime: now - day * 10, updateTime: now - day * 10 }
+      { productId: 'P006', productName: '绿松石手串', type: 'product', categoryId: 'beaded', categoryName: '手串', price: 328, costPrice: 120, stock: 0, status: '已下架', tagline: '成功之石，幸运之钥', images: [], colorName: '蓝绿', colorHex: '#2E8B57', specSize: '18cm', addTime: now - day * 20, updateTime: now - day * 19 },
+      { productId: 'M001', productName: '天然紫水晶8mm圆珠', type: 'material', categoryId: 'crystal', categoryName: '配饰-水晶', price: 28, costPrice: 8, stock: 200, status: '在售', tagline: '单颗售卖', images: [], listImages: [], displayImages: [], colorName: '紫', colorHex: '#9B6BC9', specSize: '8mm', threadWidthMm: 8, addTime: now - day * 18, updateTime: now - day * 18 },
+      { productId: 'M002', productName: '黑曜石6mm圆珠', type: 'material', categoryId: 'crystal', categoryName: '配饰-水晶', price: 18, costPrice: 5, stock: 350, status: '在售', tagline: '单颗售卖', images: [], listImages: [], displayImages: [], colorName: '黑', colorHex: '#1A1A1A', specSize: '6mm', threadWidthMm: 6, addTime: now - day * 16, updateTime: now - day * 16 },
+      { productId: 'M003', productName: '925银莲花隔珠', type: 'material', categoryId: 'silver', categoryName: '配饰-银饰', price: 35, costPrice: 10, stock: 120, status: '在售', tagline: '精致银饰，提升质感', images: [], listImages: [], displayImages: [], colorName: '银', colorHex: '#C0C0C0', specSize: '6mm', threadWidthMm: 6, addTime: now - day * 14, updateTime: now - day * 14 },
+      { productId: 'M004', productName: '红玛瑙10mm圆珠', type: 'material', categoryId: 'crystal', categoryName: '配饰-水晶', price: 22, costPrice: 6, stock: 0, status: '已下架', tagline: '单颗售卖', images: [], listImages: [], displayImages: [], colorName: '红', colorHex: '#C0392B', specSize: '10mm', threadWidthMm: 10, addTime: now - day * 12, updateTime: now - day * 11 },
+      { productId: 'M005', productName: '菩提根12mm圆珠', type: 'material', categoryId: 'wood', categoryName: '配饰-木质', price: 15, costPrice: 4, stock: 500, status: '在售', tagline: '天然菩提，禅意十足', images: [], listImages: [], displayImages: [], colorName: '米白', colorHex: '#F0EAD6', specSize: '12mm', threadWidthMm: 12, addTime: now - day * 10, updateTime: now - day * 10 }
     ],
     categories: [
-      { id: 'bracelet', name: '手链' }, { id: 'necklace', name: '项链' },
-      { id: 'earrings', name: '耳饰' }, { id: 'crystal', name: '水晶' },
-      { id: 'silver', name: '银饰' }, { id: 'wood', name: '木质' }
+      { id: 'beaded', name: '手串' },
+      { id: 'necklace', name: '项链' }, { id: 'ring', name: '戒指' },
+      { id: 'crystal', name: '配饰-水晶' }, { id: 'silver', name: '配饰-银饰' },
+      { id: 'wood', name: '配饰-木质' }
     ],
     users,
     diyItems,
@@ -314,6 +321,9 @@ function mockCall(fnName, data) {
           case 'getAdminOrders':
             result = mockGetOrders(db, data);
             break;
+          case 'getSuppliers':
+            result = { list: db.suppliers, total: db.suppliers.length };
+            break;
           case 'adminUpdateOrder':
             result = mockUpdateOrder(db, data);
             break;
@@ -355,10 +365,10 @@ function mockCall(fnName, data) {
               result = { total: rows.length, success, failList };
             } else {
               const rows = [
-                { name: '粉晶招桃花手链', price: 188, cost: 56, stock: 30, images: ['https://picsum.photos/seed/pink/200', 'https://picsum.photos/seed/pink2/200'], categoryName: '手链', tagline: '' },
-                { name: '黑曜石守护手串', price: 158, cost: 47, stock: 20, images: ['https://picsum.photos/seed/black/200', 'https://picsum.photos/seed/black2/200'], categoryName: '手链', tagline: '' },
+                { name: '粉晶招桃花手串', price: 188, cost: 56, stock: 30, images: ['https://picsum.photos/seed/pink/200', 'https://picsum.photos/seed/pink2/200'], categoryName: '手串', tagline: '' },
+                { name: '黑曜石守护手串', price: 158, cost: 47, stock: 20, images: ['https://picsum.photos/seed/black/200', 'https://picsum.photos/seed/black2/200'], categoryName: '手串', tagline: '' },
                 { name: '海蓝宝耳坠', price: 228, cost: 68, stock: 15, images: ['https://picsum.photos/seed/aqua/200'], categoryName: '耳饰', tagline: '' },
-                { name: '黄水晶招财手链', price: 128, cost: 38, stock: 40, images: ['https://picsum.photos/seed/citrine/200', 'https://picsum.photos/seed/citrine2/200'], categoryName: '手链', tagline: '' }
+                { name: '黄水晶招财手串', price: 128, cost: 38, stock: 40, images: ['https://picsum.photos/seed/citrine/200', 'https://picsum.photos/seed/citrine2/200'], categoryName: '手串', tagline: '' }
               ];
               const failList = [];
               if (!colName) failList.push({ row: 2, reason: '未指定商品名列号' });
@@ -370,8 +380,8 @@ function mockCall(fnName, data) {
                   productId: 'PRD' + (Date.now() + i),
                   productName: r.name,
                   type: 'product',
-                  categoryId: cat ? cat.id : 'bracelet',
-                  categoryName: cat ? cat.name : '手链',
+                  categoryId: cat ? cat.id : 'beaded',
+                  categoryName: cat ? cat.name : '手串',
                   price: r.price, costPrice: r.cost, stock: r.stock,
                   status: '在售',
                   tagline: useDs ? `【DS推荐】${r.name}，能量加持，助你心想事成` : (r.tagline || ''),
@@ -505,19 +515,21 @@ function mockCall(fnName, data) {
   });
 }
 
-function mockGetOrders(db, { scope, range, startTime, endTime, status, keyword, pageNum = 1, pageSize = 20, subType }) {
+function mockGetOrders(db, { scope, range, startTime, endTime, status, keyword, pageNum = 1, pageSize = 20, subType, supplierId }) {
   let list = db.orders.slice();
 
   if (scope === 'pending') {
     list = list.filter(o => o.status === '待发货');
     if (subType === 'product') list = list.filter(o => o.type === 'product');
     if (subType === 'diy') list = list.filter(o => o.type === 'diy');
+    if (supplierId) list = list.filter(o => o.supplierId === supplierId);
   }
   if (scope === 'history') {
     // 历史订单包含全部状态（待发货、运输中、已完成、已取消、待退款、已退款），
     // 仅「待支付」未成交订单不展示给供应商/卖家查看
     list = list.filter(o => o.status !== '待支付');
     if (status) list = list.filter(o => o.status === status);
+    if (supplierId) list = list.filter(o => o.supplierId === supplierId);
     const now = Date.now();
     if (range === 'today') {
       const todayStart = new Date(now).setHours(0,0,0,0);
@@ -593,12 +605,6 @@ function mockUpdateOrder(db, { orderId, action, status, sellerRemark }) {
     else if (['待发货', '运输中'].includes(o.status)) o.status = '已取消';
     else throw new Error('当前状态不允许取消');
     o.refunded = false;
-  } else if (action === 'intercept') {
-    // 拦截快递：标记已拦截（不改动订单状态，保留在退款流程中，供物流详情展示）
-    if (o.intercepted) throw new Error('该订单已发起拦截');
-    o.intercepted = true;
-    o.interceptInfo = o.interceptInfo || '已发起快递拦截，包裹退回后将处理退款';
-    o.refunded = false;
   } else if (action === 'applyRefund') {
     // 退换货：待发货/运输中/已完成 → 待退款（退款与换货统一入口）
     if (!['待发货', '运输中', '已完成'].includes(o.status)) throw new Error('当前状态不允许退换货');
@@ -606,7 +612,16 @@ function mockUpdateOrder(db, { orderId, action, status, sellerRemark }) {
   } else if (action === 'refund') {
     // 确认退款：待退款（用户退回/未发货直接退/换货原单）→ 已退款
     if (!['待退款', '已取消'].includes(o.status)) throw new Error('当前状态不允许退款');
-    o.status = '已退款'; o.refunded = true;
+    // 退款金额：实付货款 + 退货运费（由商家承担），默认仅退货款
+    const refundAmount = (data.refundAmount !== undefined && data.refundAmount !== null && data.refundAmount !== '')
+      ? Number(data.refundAmount)
+      : (o.price * o.qty || 0);
+    o.status = '已退款'; o.refunded = true; o.refundAmount = Math.round(refundAmount * 100) / 100;
+  } else if (action === 'compensate') {
+    // 补差价：从商户账户向用户付款（如承担退货运费）
+    if (!data.amount || Number(data.amount) <= 0) throw new Error('请输入大于 0 的金额');
+    o.compensations = o.compensations || [];
+    o.compensations.push({ amount: Number(data.amount), remark: data.remark || '', at: Date.now() });
   } else if (action === 'remark') {
     o.sellerRemark = sellerRemark || '';
   } else if (action === 'setStatus') {
@@ -631,7 +646,7 @@ function mockGetProducts(db, { type, categoryId, status, keyword, pageNum = 1, p
   return { list: list.slice(start, start + pageSize), total, pageNum, pageSize, hasMore: start + pageSize < total };
 }
 
-function mockManageProduct(db, { type, action, productId, productName, materialName, categoryId, price, stock, tagline, status, images, costPrice, colorName, colorHex, specSize, threadWidthMm, listImages, displayImages, ids, priceDelta, priceDeltaPct }) {
+function mockManageProduct(db, { type, action, productId, productName, materialName, categoryId, price, stock, tagline, status, images, costPrice, colorName, colorHex, specSize, threadWidthMm, listImages, displayImages, supplierId, supplierName, homeRecommended, ids, priceDelta, priceDeltaPct }) {
   const name = productName || materialName;
   if (action === 'create' || action === 'update') {
     const cat = db.categories.find(c => c.id === categoryId);
@@ -646,6 +661,9 @@ function mockManageProduct(db, { type, action, productId, productName, materialN
           stock: +stock, tagline,
           status: status || db.products[idx].status || '在售',
           images: images || db.products[idx].images || [],
+          supplierId: supplierId != null ? supplierId : db.products[idx].supplierId,
+          supplierName: supplierName != null ? supplierName : db.products[idx].supplierName,
+          homeRecommended: homeRecommended != null ? !!homeRecommended : db.products[idx].homeRecommended,
           colorName: colorName != null ? colorName : db.products[idx].colorName,
           colorHex: colorHex != null ? colorHex : db.products[idx].colorHex,
           specSize: specSize != null ? specSize : db.products[idx].specSize,
@@ -663,7 +681,9 @@ function mockManageProduct(db, { type, action, productId, productName, materialN
         categoryName: cat ? cat.name : '', price: +price,
         costPrice: costPrice != null && costPrice !== '' ? +costPrice : 0,
         stock: +stock, tagline, status: status || '在售',
-        images: images || [], colorName: colorName || '', colorHex: colorHex || '', specSize: specSize || '',
+        images: images || [],
+        supplierId: supplierId || '', supplierName: supplierName || '', homeRecommended: !!homeRecommended,
+        colorName: colorName || '', colorHex: colorHex || '', specSize: specSize || '',
         addTime: Date.now(), updateTime: Date.now()
       };
       if (isMaterial) {

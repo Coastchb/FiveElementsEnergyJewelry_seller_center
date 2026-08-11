@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>五行能量饰品馆 · 卖家中心</title>
-<link rel="stylesheet" href="css/style.css?v=202607312200">
+<link rel="stylesheet" href="css/style.css?v=2026080616">
 </head>
 <body>
 <!-- 登录页 -->
@@ -144,6 +144,10 @@
             <div class="pc-num warn" id="pmCntUnship">0</div>
             <div class="pc-label">待发货</div>
           </div>
+          <div class="pending-count-box" data-status="已支付">
+            <div class="pc-num danger" id="pmCntPaid">0</div>
+            <div class="pc-label">异常订单</div>
+          </div>
           <div class="pending-count-box" data-status="待退款">
             <div class="pc-num danger" id="pmCntRefund">0</div>
             <div class="pc-label">待退款</div>
@@ -167,7 +171,9 @@
 
     <!-- 订单管理 -->
     <section id="page-orders" class="page-section" style="display:none;">
-      <div class="page-header"><h1>订单管理</h1></div>
+      <div class="page-header">
+      <h1>订单管理</h1>
+    </div>
       <!-- Tab -->
       <div class="tab-bar" id="orderTabs">
         <button class="tab-btn active" data-tab="pending">待发货订单</button>
@@ -179,9 +185,14 @@
           <button class="sub-tab-btn active" data-sub="product">成品 <span class="sub-count" id="subCntProduct"></span></button>
           <button class="sub-tab-btn" data-sub="diy">DIY <span class="sub-count" id="subCntDiy"></span></button>
         </div>
-        <div class="toolbar">
-          <button class="btn btn-green" id="printAllBtn">打印所有快递面单</button>
-          <span class="toolbar-info" id="pendingCount">共 0 笔待发货</span>
+        <div class="toolbar order-filter-row">
+          <div class="order-filter-left">
+            <button class="btn btn-green" id="printAllBtn">打印所有快递面单</button>
+            <span class="toolbar-info" id="pendingCount">共 0 笔待发货</span>
+          </div>
+          <select id="orderSupplier" class="filter-select">
+            <option value="">加载供应商中...</option>
+          </select>
         </div>
         <div class="order-list" id="pendingList">
           <div class="empty-state">暂无待发货订单</div>
@@ -205,12 +216,18 @@
           <div class="filter-group">
             <select id="historyStatus" class="filter-select">
               <option value="">全部状态</option>
+              <option value="待支付">待支付</option>
               <option value="待发货">待发货</option>
+              <option value="已支付">已支付</option>
               <option value="运输中">运输中</option>
               <option value="已完成">已完成</option>
               <option value="已取消">已取消</option>
               <option value="待退款">待退款</option>
               <option value="已退款">已退款</option>
+              <option value="支付失败">支付失败</option>
+            </select>
+            <select id="historySupplier" class="filter-select">
+              <option value="">全部供应商</option>
             </select>
             <input type="text" id="historyKeyword" class="filter-input" placeholder="搜索订单号/用户名...">
           </div>
@@ -228,9 +245,9 @@
       <div class="page-header">
         <h1>商品管理</h1>
         <div class="header-actions">
-          <button class="btn btn-outline" id="addProductBtn">+ 新增商品</button>
-          <button class="btn btn-outline" id="importDocBtn">📥 批量上传</button>
-          <a class="btn btn-link" id="gotoTaskHistoryBtn" href="#taskhistory">📋 上传历史</a>
+          <button class="btn btn-outline" id="uploadImagesBtn">🖼️ 上传商品图片</button>
+          <button class="btn btn-outline" id="importDocBtn">📥 批量上传商品</button>
+          <button class="btn btn-outline" id="gotoTaskHistoryBtn">📋 上传历史</button>
         </div>
       </div>
       <div class="toolbar filter-bar" style="justify-content: flex-start;">
@@ -238,7 +255,7 @@
           <select id="prodType" class="filter-select">
             <option value="">全部类型</option>
             <option value="product">成品饰品</option>
-            <option value="material">DIY材料</option>
+            <option value="material">配饰</option>
           </select>
           <select id="prodCategory" class="filter-select">
             <option value="">全部分类</option>
@@ -252,30 +269,33 @@
           <input type="text" id="prodKeyword" class="filter-input" placeholder="搜索商品名...">
         </div>
         <div class="filter-group">
-          <button class="btn btn-sm btn-outline" id="batchShelfBtn">批量上传</button>
+          <button class="btn btn-sm btn-outline" id="batchShelfBtn">批量上架</button>
           <button class="btn btn-sm btn-outline" id="batchOffBtn">批量下架</button>
           <button class="btn btn-sm btn-outline" id="batchStockBtn">批量改库存</button>
           <button class="btn btn-sm btn-outline" id="batchPriceBtn">批量改价格</button>
+          <button class="btn btn-sm btn-outline" id="batchDeleteBtn">批量删除</button>
         </div>
       </div>
       <div class="toolbar"><span class="toolbar-info" id="prodTotalText"></span></div>
       <div class="table-wrap">
-        <table class="data-table" id="productTable">
+        <table class="data-table product-table" id="productTable">
           <thead>
             <tr>
               <th style="width:40px"><input type="checkbox" id="selectAll"></th>
-              <th>商品名称</th>
-              <th style="width:80px">类型</th>
-              <th style="width:80px">分类</th>
+              <th style="width:220px">商品名称</th>
+              <th style="width:60px">类型</th>
+              <th style="width:70px">分类</th>
               <th style="width:80px">价格</th>
               <th style="width:80px">成本价</th>
-              <th style="width:60px">库存</th>
-              <th style="width:70px">状态</th>
-              <th style="width:100px">操作</th>
+              <th style="width:70px">库存</th>
+              <th style="width:100px">供应商</th>
+              <th style="width:80px">首页推荐</th>
+              <th style="width:80px">状态</th>
+              <th style="width:120px">操作</th>
             </tr>
           </thead>
           <tbody id="productBody">
-            <tr><td colspan="9" class="empty-state">暂无商品数据</td></tr>
+            <tr><td colspan="11" class="empty-state">暂无商品数据</td></tr>
           </tbody>
         </table>
       </div>
@@ -374,6 +394,7 @@
               <th>任务ID</th>
               <th>提交时间</th>
               <th>操作人</th>
+              <th>上传类型</th>
               <th>上传文件</th>
               <th>参数</th>
               <th>结束时间</th>
@@ -382,7 +403,7 @@
             </tr>
           </thead>
           <tbody id="taskBody">
-            <tr><td colspan="8" class="empty-state">暂无上传任务</td></tr>
+            <tr><td colspan="9" class="empty-state">暂无上传任务</td></tr>
           </tbody>
         </table>
       </div>
@@ -392,6 +413,16 @@
 
 <!-- Toast -->
 <div id="toast" class="toast"></div>
+
+<!-- 图片灯箱预览 -->
+<div id="imgLightbox" class="img-lightbox" style="display:none;">
+  <div class="img-lightbox-backdrop"></div>
+  <button class="img-lightbox-close">✕</button>
+  <button class="img-lightbox-prev">‹</button>
+  <button class="img-lightbox-next">›</button>
+  <div class="img-lightbox-counter"><span id="imgLightboxCurr">1</span> / <span id="imgLightboxTotal">1</span></div>
+  <div class="img-lightbox-stage"><img id="imgLightboxImg" src="" alt=""></div>
+</div>
 
 <!-- Modal 通用弹窗 -->
 <div id="modalOverlay" class="modal-overlay" style="display:none;">
@@ -414,7 +445,7 @@
           <label>商品名称</label><input type="text" id="pfName" class="form-input" required>
         </div>
         <div class="form-row">
-          <label>类型</label><select id="pfProdType" class="form-input"><option value="product">成品饰品</option><option value="material">DIY材料</option></select>
+          <label>类型</label><select id="pfProdType" class="form-input"><option value="product">成品饰品</option><option value="material">配饰</option></select>
         </div>
         <div class="form-row">
           <label>分类</label><select id="pfCategory" class="form-input"></select>
@@ -431,7 +462,7 @@
         <div class="form-row">
           <label>标语</label><input type="text" id="pfTagline" class="form-input">
         </div>
-        <div class="form-row" style="align-items:flex-start;">
+        <div class="form-row" style="align-items:flex-start;display:none;">
           <label style="padding-top:8px;">图片URL</label>
           <div style="flex:1;">
             <textarea id="pfImages" class="form-input" rows="4" placeholder="每行一个图片URL，支持多张；第一张自动作为主图"></textarea>
@@ -502,6 +533,17 @@
           </select>
         </div>
         <div class="form-row">
+          <label>供应商</label>
+          <select id="pfSupplierId" class="form-input"></select>
+        </div>
+        <div class="form-row">
+          <label>首页推荐</label>
+          <select id="pfHomeRecommended" class="form-input">
+            <option value="false">否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+        <div class="form-row">
           <label>颜色名</label><input type="text" id="pfColorName" class="form-input" placeholder="如 帝王砂绿">
         </div>
         <div class="form-row">
@@ -522,17 +564,70 @@
   </div>
 </div>
 
+<!-- 上传商品图片弹窗 -->
+<div id="uploadImagesModal" class="modal-overlay" style="display:none;">
+  <div class="modal-box modal-lg">
+    <div class="modal-header">
+      <span>🖼️ 上传商品图片</span>
+      <button class="modal-close" id="uploadImagesClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="upload-summary-err" id="uiSummaryErr" style="display:none;color:#C0392B;font-size:13px;font-weight:500;margin:0 0 12px;padding:8px 10px;background:rgba(192,57,43,.06);border-radius:8px;"></div>
+      <div class="form-row">
+        <label>上传类型</label>
+        <select id="uiType" class="form-input">
+          <option value="product" selected>成品</option>
+          <option value="material">配饰</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>腾讯文档链接</label>
+        <input type="text" id="uiDocUrl" class="form-input" placeholder="https://docs.qq.com/sheet/DRVhnUkJjdERmTWZR?tab=...">
+      </div>
+      <div class="form-row">
+        <label id="uiColNameLabel">商品名列号</label>
+        <input type="text" id="uiColName" class="form-input" value="A" maxlength="3">
+      </div>
+      <div class="form-row">
+        <label>每个商品图片数</label>
+        <input type="number" id="uiImagesPer" class="form-input" value="6" min="1" max="20">
+      </div>
+      <div class="form-row">
+        <label>图片URL起始列号</label>
+        <input type="text" id="uiWriteStart" class="form-input" value="X" maxlength="3">
+      </div>
+      <div class="form-row" style="align-items:flex-start;">
+        <label style="padding-top:8px;">选择图片目录</label>
+        <div style="flex:1;">
+          <input type="file" id="uiFileInput" class="form-input" accept="image/*" webkitdirectory directory multiple>
+          <div id="uiFileHint" class="upload-file-hint">未选择目录</div>
+        </div>
+      </div>
+      <div id="uiProgressWrap" class="upload-progress" style="display:none;">
+        <div class="upload-progress-bar"><div id="uiProgressBar" class="upload-progress-fill"></div></div>
+        <div id="uiProgressText" class="upload-progress-text"></div>
+      </div>
+      <div id="uiResult" class="upload-result"></div>
+    </div>
+    <div class="modal-footer" id="uploadImagesFooter">
+      <button class="btn btn-outline" id="uploadImagesCancel">取消</button>
+      <button class="btn btn-primary" id="uploadImagesStart">开始上传</button>
+      <button class="btn btn-primary" id="uploadImagesDone" style="display:none;">完成</button>
+    </div>
+  </div>
+</div>
+
 <script>window.__MOCK__ = false;</script>
 <!-- 真实后端域名：在 CloudBase 控制台 → adminLogin 的 HTTP 网关路由里复制，格式为 https://<环境ID>.ap-shanghai.app.tcloudbase.com，不要带 /adminLogin（前端会自动拼接） -->
 <script>window.__API_BASE__ = 'https://cloud1-d8gspzw1m242c79ce-1460636638.ap-shanghai.app.tcloudbase.com';</script>
-<script src="js/api.js?v=2026080301"></script>
-<script src="js/utils.js?v=202607312200"></script>
-<script src="js/dashboard.js?v=202607312200"></script>
-<script src="js/orders.js?v=202607312200"></script>
-<script src="js/products.js?v=2026080301"></script>
-<script src="js/users.js?v=202607312200"></script>
-<script src="js/dbview.js?v=2026080301"></script>
-<script src="js/taskhistory.js?v=2026080201"></script>
-<script src="js/app.js?v=2026080201"></script>
+  <script src="js/api.js?v=2026080910"></script>
+  <script src="js/utils.js?v=2026080910"></script>
+  <script src="js/dashboard.js?v=2026080910"></script>
+  <script src="js/orders.v2.js?v=2026080910"></script>
+  <script src="js/products.js?v=2026080910"></script>
+  <script src="js/users.js?v=2026080910"></script>
+  <script src="js/dbview.js?v=2026080910"></script>
+  <script src="js/taskhistory.js?v=2026080910"></script>
+  <script src="js/app.js?v=2026080910"></script>
 </body>
 </html>

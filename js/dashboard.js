@@ -96,6 +96,7 @@ async function loadDashboard() {
     $('#dashTime').textContent = new Date().toLocaleString('zh-CN');
     // 待处理订单数量（来自 getOrderStats 已统计，无需拉全量列表）
     if ($('#pmCntUnship')) $('#pmCntUnship').textContent = stats.unshippedOrderCount || 0;
+    if ($('#pmCntPaid')) $('#pmCntPaid').textContent = stats.paidOrderCount || 0;
     if ($('#pmCntRefund')) $('#pmCntRefund').textContent = stats.pendingRefundCount || 0;
     // 记录最新统计，供利润卡片弹窗使用
     _dashStats = stats;

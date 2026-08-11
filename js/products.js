@@ -8,11 +8,50 @@ let productState = {
 let _productCategories = [];
 let _selectedIds = new Set();
 let _productCache = {};   // productId → 商品对象（含解析后的 _images/_listImages/_displayImages 链接）
+let _suppliers = [];      // 供应商列表缓存 { supplierId, name }
+let _categories = [];     // 后端分类缓存 { id, name }，来自 categories 集合
 let _productsInited = false;
 
-function initProducts() {
+async function loadSuppliers() {
+  try {
+    const res = await apiCall('getAdminUsers', { role: 'supplier', pageNum: 1, pageSize: 1000 });
+    _suppliers = (res && res.list) || [];
+    const sel = $('#pfSupplierId');
+    if (sel) {
+      const current = sel.value;
+      sel.innerHTML = '<option value="">请选择供应商</option>' +
+        _suppliers.map(s => `<option value="${escapeHtml(s.supplierId)}">${escapeHtml(s.name || s.account || s.supplierId)}</option>`).join('');
+      if (current && _suppliers.find(s => s.supplierId === current)) sel.value = current;
+    }
+  } catch (e) {
+    console.warn('加载供应商列表失败', e);
+  }
+}
+
+async function loadCategories() {
+  try {
+    const res = await apiCall('getCollectionData', { collection: 'categories', pageNum: 1, pageSize: 1000 });
+    _categories = (res && res.list) || [];
+  } catch (e) {
+    console.warn('加载分类列表失败', e);
+    _categories = [];
+  }
+}
+
+function getSupplierName(supplierId) {
+  const s = _suppliers.find(x => x.supplierId === supplierId);
+  return s ? (s.name || s.account || supplierId) : '';
+}
+
+async function initProducts() {
   if (_productsInited) return;
   _productsInited = true;
+
+  // 加载供应商/分类列表，供编辑弹窗下拉框使用
+  loadSuppliers();
+  await loadCategories();
+  updateCategoryOptions();
+
   // 筛选变化
   $('#prodType').addEventListener('change', async (e) => {
     productState.type = e.target.value; productState.page = 1;
@@ -32,23 +71,30 @@ function initProducts() {
     await loadProducts();
   }, 400));
 
-  // 新增商品
-  $('#addProductBtn').addEventListener('click', () => openProductForm(null));
-
   // 从 Excel 批量上传
-  $('#importDocBtn').addEventListener('click', openImportDocModal);
+  $('#importDocBtn').addEventListener('click', openImportConfirmModal);
+
+  // 上传商品图片（腾讯文档 → 云存储 → 回写文档）
+  $('#uploadImagesBtn').addEventListener('click', openUploadImagesModal);
 
   // 批量操作
   $('#batchShelfBtn').addEventListener('click', () => batchShelf(true));
   $('#batchOffBtn').addEventListener('click', () => batchShelf(false));
   $('#batchStockBtn').addEventListener('click', openBatchStockModal);
   $('#batchPriceBtn').addEventListener('click', openBatchPriceModal);
+  $('#batchDeleteBtn').addEventListener('click', batchDelete);
+
+  // 上传历史按钮（与其他按钮一致，点击切换到上传历史页）
+  const gotoTh = $('#gotoTaskHistoryBtn');
+  if (gotoTh) gotoTh.addEventListener('click', () => {
+    if (typeof navigateTo === 'function') navigateTo('taskhistory');
+  });
 
   // 全选
   $('#selectAll').addEventListener('change', (e) => {
     _selectedIds.clear();
     if (e.target.checked) {
-      $$('#productBody input[type="checkbox"]').forEach(cb => _selectedIds.add(cb.value));
+      $$('#productBody input[type="checkbox"]').forEach(cb => _selectedIds.add(cb.value + ':' + (cb.dataset.type || 'product')));
     }
     updateCheckboxes();
   });
@@ -185,7 +231,7 @@ function setAiMsg(el, text, cls) {
 async function loadProducts() {
   try {
     const params = {
-      type: productState.type || undefined,
+      type: productState.type || 'all',
       categoryId: productState.categoryId || undefined,
       status: productState.status || undefined,
       keyword: productState.keyword || undefined,
@@ -197,7 +243,7 @@ async function loadProducts() {
 
     const tbody = $('#productBody');
     if (!data.list || data.list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">暂无商品数据</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="empty-state">暂无商品数据</td></tr>';
       return;
     }
 
@@ -217,24 +263,28 @@ async function loadProducts() {
       (p.displayImages || []).forEach(img => allImgs.push(img));
     });
     const urlMap = await resolveImageUrls(allImgs);
-    // 给每个商品附加解析后的可渲染链接
+    // 给每个商品附加解析后的可渲染链接，并计算统一业务 ID
     data.list.forEach(p => {
+      p._idField = p.type === 'material' ? 'materialId' : 'productId';
+      p._bizId = p[p._idField] || '';
       p._images = (p.images || (p.firstImage ? [p.firstImage] : [])).map(v => urlMap.get(v) || '');
       p._listImages = (p.listImages || []).map(v => urlMap.get(v) || '');
       p._displayImages = (p.displayImages || []).map(v => urlMap.get(v) || '');
-      _productCache[p.productId] = p;
+      if (p._bizId) _productCache[p._bizId] = p;
     });
 
     tbody.innerHTML = data.list.map(p => {
       const statusText = p.status || '在售';
       const shelfColor = statusText === '在售' ? '#3C8C40' : (statusText === '已下架' ? '#999' : '#C9760E');
       const stockClass = p.stock <= 0 ? 'stock-low' : '';
-      const typeText = p.type === 'product' ? '成品' : '材料';
+      const typeText = p.type === 'product' ? '成品' : (p.type === 'material' ? '配饰' : '材料');
       const imgSrc = (p._images && p._images[0]) || '';
       const name = p.productName || p.materialName || '';
+      const homeText = p.homeRecommended ? '是' : '否';
+      const supplierName = p.supplierName || getSupplierName(p.supplierId) || '-';
       return `
       <tr>
-        <td><input type="checkbox" value="${p.productId}" class="prod-cb"></td>
+        <td><input type="checkbox" value="${p._bizId}" data-type="${p.type || 'product'}" class="prod-cb"></td>
         <td>
           <div style="display:flex;align-items:center;gap:10px;">
             ${imgSrc ? `<img src="${imgSrc}" class="prod-img-thumb" onerror="this.style.display='none'">` : ''}
@@ -249,10 +299,12 @@ async function loadProducts() {
         <td>${fmtMoney(p.price)}</td>
         <td style="color:var(--text-light)">${fmtMoney(p.costPrice != null ? p.costPrice : 0)}</td>
         <td class="${stockClass}">${p.stock}</td>
+        <td>${supplierName}</td>
+        <td>${homeText}</td>
         <td><span style="color:${shelfColor};font-weight:500;">${statusText}</span></td>
         <td>
-          <span class="action-link" data-id="${p.productId}" data-action="edit">编辑</span>
-          <span class="action-link danger" data-id="${p.productId}" data-action="delete">删除</span>
+          <span class="action-link" data-id="${p._bizId}" data-type="${p.type || 'product'}" data-action="edit">编辑</span>
+          <span class="action-link danger" data-id="${p._bizId}" data-type="${p.type || 'product'}" data-action="delete">删除</span>
         </td>
       </tr>`;
     }).join('');
@@ -262,16 +314,19 @@ async function loadProducts() {
       link.addEventListener('click', (e) => {
         const id = link.dataset.id;
         const action = link.dataset.action;
-        if (action === 'edit') openProductForm(id);
-        else if (action === 'delete') deleteProduct(id);
+        const type = link.dataset.type;
+        if (action === 'edit') openProductForm(id, type);
+        else if (action === 'delete') deleteProduct(id, type);
       });
     });
 
     // 绑定复选框
     tbody.querySelectorAll('.prod-cb').forEach(cb => {
       cb.addEventListener('change', () => {
-        if (cb.checked) _selectedIds.add(cb.value);
-        else _selectedIds.delete(cb.value);
+        const id = cb.value;
+        const type = cb.dataset.type;
+        if (cb.checked) _selectedIds.add(id + ':' + type);
+        else _selectedIds.delete(id + ':' + type);
         $('#selectAll').checked = _selectedIds.size === (data.list || []).length;
       });
     });
@@ -287,40 +342,112 @@ async function loadProducts() {
 
 function updateCheckboxes() {
   $$('#productBody .prod-cb').forEach(cb => {
-    cb.checked = _selectedIds.has(cb.value);
+    cb.checked = _selectedIds.has(cb.value + ':' + (cb.dataset.type || 'product'));
   });
+}
+
+/** 把 _selectedIds（存储为 "id:type"）按 type 分组 */
+function getSelectedGroups() {
+  const groups = {};
+  _selectedIds.forEach(item => {
+    const idx = item.lastIndexOf(':');
+    const id = idx > 0 ? item.slice(0, idx) : item;
+    const type = idx > 0 ? item.slice(idx + 1) : 'product';
+    if (!groups[type]) groups[type] = [];
+    groups[type].push(id);
+  });
+  return groups;
+}
+
+/** 对 product/material 分组执行同一 manageProduct action */
+async function runGroupedManageAction(action, extraBuilder) {
+  const groups = getSelectedGroups();
+  const types = Object.keys(groups);
+  let total = 0;
+  for (const type of types) {
+    const ids = groups[type].join(',');
+    const extra = extraBuilder ? extraBuilder(type) : {};
+    const res = await apiCall('manageProduct', { action, type, ids, ...extra });
+    total += (res && (res.updated != null ? res.updated : res.deleted)) || 0;
+  }
+  return { total, types };
 }
 
 async function batchShelf(toOn) {
   if (_selectedIds.size === 0) { showToast('请先选择商品', 'info'); return; }
-  const ids = Array.from(_selectedIds).join(',');
-  try {
-    await apiCall('manageProduct', { action: toOn ? 'batchShelf' : 'batchOff', ids, status: toOn ? '在售' : '已下架' });
-    showToast(toOn ? '批量上架成功' : '批量下架成功', 'success');
-    _selectedIds.clear();
-    $('#selectAll').checked = false;
-    await loadProducts();
-  } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+  const verb = toOn ? '上架' : '下架';
+  showModal('确认' + verb, `
+    <p style="text-align:center;font-size:15px;line-height:1.6;">确定要将选中的 <b>${_selectedIds.size}</b> 个商品批量${verb}吗？</p>
+  `, `
+    <button class="btn ${toOn ? 'btn-primary' : 'btn-danger'}" id="batchShelfConfirm">确定</button>
+    <button class="btn btn-outline" onclick="closeModal()">取消</button>
+  `);
+  setTimeout(() => {
+    const btn = $('#batchShelfConfirm');
+    if (btn) btn.onclick = async () => {
+      closeModal();
+      try {
+        const status = toOn ? '在售' : '已下架';
+        const { total } = await runGroupedManageAction(toOn ? 'batchShelf' : 'batchOff', () => ({ status }));
+        showToast(`${toOn ? '批量上架' : '批量下架'}成功（共 ${total} 条）`, 'success');
+        _selectedIds.clear();
+        $('#selectAll').checked = false;
+        await loadProducts();
+      } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+    };
+  }, 50);
+}
+
+async function batchDelete() {
+  if (_selectedIds.size === 0) { showToast('请先选择商品', 'info'); return; }
+  showModal('确认删除', `
+    <p style="text-align:center;font-size:15px;line-height:1.6;color:#C0392B;">确定要永久删除选中的 <b>${_selectedIds.size}</b> 个商品吗？此操作不可恢复。</p>
+  `, `
+    <button class="btn btn-danger" id="batchDeleteConfirm">确定删除</button>
+    <button class="btn btn-outline" onclick="closeModal()">取消</button>
+  `);
+  setTimeout(() => {
+    const btn = $('#batchDeleteConfirm');
+    if (btn) btn.onclick = async () => {
+      closeModal();
+      try {
+        const { total } = await runGroupedManageAction('delete');
+        showToast(`已删除 ${total} 个商品`, 'success');
+        _selectedIds.clear();
+        $('#selectAll').checked = false;
+        await loadProducts();
+      } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
+    };
+  }, 50);
+}
+
+function filterCategoriesByType(type) {
+  // 配饰类型的分类名含 "配饰-"，成品饰品类型使用其余分类
+  if (type === 'material') return _categories.filter(c => (c.name || '').includes('配饰-'));
+  if (type === 'product') return _categories.filter(c => !(c.name || '').includes('配饰-'));
+  return _categories;
 }
 
 function updateCategoryOptions() {
   const sel = $('#prodCategory');
   const current = sel.value;
   sel.innerHTML = '<option value="">全部分类</option>';
-  // 根据类型筛选可用分类 - 从全局 mock 数据获取
-  const db = getDB();
-  let cats = db.categories;
-  if (productState.type === 'product') cats = cats.filter(c => ['bracelet', 'necklace', 'earrings'].includes(c.id));
-  if (productState.type === 'material') cats = cats.filter(c => ['crystal', 'silver', 'wood'].includes(c.id));
+  const cats = filterCategoriesByType(productState.type);
   cats.forEach(c => { sel.innerHTML += `<option value="${c.id}">${c.name}</option>`; });
   sel.value = current && cats.find(c => c.id === current) ? current : '';
 }
 
-function openProductForm(productId) {
-  const db = getDB();
-  const cats = db.categories;
+async function openProductForm(productId, type) {
+  // 确保分类/供应商列表已加载
+  if (!_categories.length) await loadCategories();
+  if (!_suppliers.length) await loadSuppliers();
+
   const sel = $('#pfCategory');
-  sel.innerHTML = cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  const supplierSel = $('#pfSupplierId');
+  if (supplierSel) {
+    supplierSel.innerHTML = '<option value="">请选择供应商</option>' +
+      _suppliers.map(s => `<option value="${escapeHtml(s.supplierId)}">${escapeHtml(s.name || s.account || s.supplierId)}</option>`).join('');
+  }
 
   const setImages = (id, arr, previewUrls) => {
     const ta = $(`#${id}`);
@@ -331,12 +458,15 @@ function openProductForm(productId) {
   };
 
   if (productId) {
-    const p = db.products.find(prod => prod.productId === productId);
-    if (!p) return;
+    // 真实后端模式下优先使用列表缓存，缓存未命中再回退到本地 mock 数据
+    let p = _productCache[productId];
+    if (!p && type === 'product') p = db.products.find(prod => prod.productId === productId);
+    if (!p && type === 'material') p = db.materials.find(m => m.materialId === productId);
+    if (!p) { showToast('未找到该商品', 'error'); return; }
     const cached = _productCache[productId] || {};
-    $('#pfId').value = p.productId;
+    $('#pfId').value = productId;
     $('#pfName').value = p.productName || p.materialName || '';
-    $('#pfProdType').value = p.type;
+    $('#pfProdType').value = p.type || type;
     $('#pfCategory').value = p.categoryId;
     $('#pfPrice').value = p.price;
     $('#pfCost').value = p.costPrice != null ? p.costPrice : '';
@@ -345,7 +475,9 @@ function openProductForm(productId) {
     // textarea 存原始 fileID（保存时回写），预览用解析后的 http 链接
     setImages('pfImages', p.images || (p.firstImage ? [p.firstImage] : []), cached._images);
     $('#pfStatus').value = p.status || '在售';
-    $('#pfType').value = p.type;
+    $('#pfType').value = p.type || type;
+    if (supplierSel) supplierSel.value = p.supplierId || '';
+    $('#pfHomeRecommended').value = p.homeRecommended ? 'true' : 'false';
     $('#pfColorName').value = p.colorName || '';
     $('#pfColorHex').value = p.colorHex || '';
     $('#pfSpecSize').value = p.specSize || '';
@@ -357,7 +489,6 @@ function openProductForm(productId) {
     $('#pfId').value = '';
     $('#pfName').value = '';
     $('#pfProdType').value = 'product';
-    $('#pfCategory').value = cats[0] ? cats[0].id : '';
     $('#pfPrice').value = '';
     $('#pfCost').value = '';
     $('#pfStock').value = '';
@@ -365,6 +496,8 @@ function openProductForm(productId) {
     setImages('pfImages', []);
     $('#pfStatus').value = '在售';
     $('#pfType').value = 'product';
+    if (supplierSel) supplierSel.value = '';
+    $('#pfHomeRecommended').value = 'false';
     $('#pfColorName').value = '';
     $('#pfColorHex').value = '';
     $('#pfSpecSize').value = '';
@@ -374,18 +507,17 @@ function openProductForm(productId) {
     $('#prodModalTitle').textContent = '新增商品';
   }
   updateProdFormCategories();
+  if (!productId && !sel.value && sel.options.length) sel.value = sel.options[0].value;
   $('#prodModalOverlay').style.display = 'flex';
 }
 
 function updateProdFormCategories() {
-  const db = getDB();
   const type = $('#pfProdType').value;
-  let cats = db.categories;
-  if (type === 'product') cats = cats.filter(c => ['bracelet', 'necklace', 'earrings'].includes(c.id));
-  if (type === 'material') cats = cats.filter(c => ['crystal', 'silver', 'wood'].includes(c.id));
+  const cats = filterCategoriesByType(type);
   const sel = $('#pfCategory');
   const current = sel.value;
   sel.innerHTML = cats.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  if (!cats.length) sel.innerHTML = '<option value="">暂无分类</option>';
   if (current && cats.find(c => c.id === current)) sel.value = current;
 
   // 材料类型显示列表图/展示图字段
@@ -401,12 +533,16 @@ function closeProductForm() { $('#prodModalOverlay').style.display = 'none'; }
 async function saveProduct() {
   const id = $('#pfId').value;
   const type = $('#pfProdType').value;
+  const isMaterial = type === 'material';
+  const idKey = isMaterial ? 'materialId' : 'productId';
+  const nameKey = isMaterial ? 'materialName' : 'productName';
   const parseUrls = (id) => $(`#${id}`).value.split('\n').map(s => s.trim()).filter(Boolean);
+  const supplierId = $('#pfSupplierId').value;
   const data = {
     action: id ? 'update' : 'create',
-    productId: id || undefined,
-    productName: $('#pfName').value,
     type,
+    [idKey]: id || undefined,
+    [nameKey]: $('#pfName').value,
     categoryId: $('#pfCategory').value,
     price: $('#pfPrice').value,
     costPrice: $('#pfCost').value,
@@ -414,16 +550,19 @@ async function saveProduct() {
     tagline: $('#pfTagline').value,
     images: parseUrls('pfImages'),
     status: $('#pfStatus').value,
+    supplierId,
+    supplierName: supplierId ? getSupplierName(supplierId) : '',
+    homeRecommended: $('#pfHomeRecommended').value === 'true',
     colorName: $('#pfColorName').value.trim(),
     colorHex: $('#pfColorHex').value.trim(),
     specSize: $('#pfSpecSize').value.trim()
   };
-  if (type === 'material') {
+  if (isMaterial) {
     data.threadWidthMm = $('#pfThreadWidth').value;
     data.listImages = parseUrls('pfListImages');
     data.displayImages = parseUrls('pfDisplayImages');
   }
-  if (!data.productName || !data.categoryId || !data.price || data.stock === '') {
+  if (!data[nameKey] || !data.categoryId || !data.price || data.stock === '') {
     showToast('请填写完整信息', 'error'); return;
   }
   try {
@@ -434,7 +573,8 @@ async function saveProduct() {
   } catch(e) { showToast('保存失败: ' + e.message, 'error'); }
 }
 
-async function deleteProduct(productId) {
+async function deleteProduct(productId, type) {
+  const idKey = type === 'material' ? 'materialId' : 'productId';
   showModal('确认删除', `<p style="text-align:center;">确定要删除该商品吗？此操作不可恢复。</p>`, `
     <button class="btn btn-danger" id="deleteConfirm">确认删除</button>
     <button class="btn btn-outline" onclick="closeModal()">取消</button>
@@ -444,7 +584,7 @@ async function deleteProduct(productId) {
     if (btn) btn.onclick = async () => {
       closeModal();
       try {
-        await apiCall('manageProduct', { productId, action: 'delete' });
+        await apiCall('manageProduct', { action: 'delete', type, [idKey]: productId });
         showToast('删除成功', 'success');
         await loadProducts();
       } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
@@ -493,10 +633,9 @@ function openBatchPriceModal() {
 }
 
 async function runBatch(action, extra) {
-  const ids = Array.from(_selectedIds).join(',');
   try {
-    await apiCall('manageProduct', { action, ids, ...extra });
-    showToast('批量操作成功', 'success');
+    const { total, types } = await runGroupedManageAction(action, () => extra);
+    showToast(`批量操作成功（涉及 ${types.length} 种类型，共 ${total} 条）`, 'success');
     closeModal();
     _selectedIds.clear();
     $('#selectAll').checked = false;
@@ -583,36 +722,33 @@ async function uploadFileToCloud(file, onProgress) {
 // 成品 / 配饰共用基础列，配饰额外要求透明图列 + 处理参数列
 const IMPORT_COL_DEFAULTS = {
   product: {
-    colName: 'A', colPrice: 'H', colCost: 'I',
-    colCategory: 'G', colTagline: 'O',
-    colImages: 'R,S,T,U,V,W',
-    colBeadSize: 'E',
-    colElements: 'O', colHome: 'X',
+    colRawName: 'A', colName: 'O', colRawPrice: 'I', colPrice: 'H', colCost: 'G',
+    colCategory: 'F', colTagline: 'N',
+    colImages: 'X,Y,Z,AA,AB,AC',
+    colBeadSize: 'D',
+    colElements: 'P', colHome: 'W',
   },
   material: {
-    colName: 'A', colPrice: 'H', colCost: 'I',
-    colCategory: 'G',
-    colTransparent: 'Q',        // 配饰专属：内嵌透明 PNG 所在列，经 processBeadImage 处理
-    colRealW: 'N', colRealH: 'O', colThreadDir: 'P', colThickness: 'R', colThreadWidth: 'S',
-    colShape: 'T', colElements: 'V',
+    // 默认列号与业务 Excel 对齐（材料名A / 配饰图片C / 分类D / 零售原价I / 零售现价E / 成本价F /
+    // 横向G / 纵向H / 形状I / 穿线方向J / 穿线宽度K / 是否挂坠L / 五行属M）
+    colRawName: 'A', colName: 'O', colRawPrice: 'I', colPrice: 'E', colCost: 'F',
+    colTransparent: 'C', colCategory: 'D',
+    colRealW: 'G', colRealH: 'H', colShape: 'I', colThreadDir: 'J', colThreadWidth: 'K',
+    colPendant: 'L',            // 是否挂坠列号：填 TRUE/是/1 表示挂坠（front_back）
+    colElements: 'M',
+    thicknessMm: 3,             // 默认厚度 3mm（固定值，非 Excel 列号）
+    kPxPerMm: '',               // 默认留空：按原图不放大
   },
 };
 
 // 上传弹窗必填校验：返回未填字段 id 列表（空数组表示全部已填）
-// 例外（非必填）：库存列（diColStock，只读）、配饰的厚度（diMColThickness）、统一像素精度（diMKpxPerMm）
+// 例外（非必填）：库存列（diColStock，只读）、统一像素精度（diMKpxPerMm）
 function validateImportForm() {
   const type = $('#diType').value;
-  const source = $('#diSource') ? $('#diSource').value : 'xlsx';
   const required = [
     'diSupplier',
+    'diDocUrl', // 固定腾讯文档在线表格模式，链接必填
   ];
-  // 本地 Excel 模式：文件 + 工作表必填
-  if (source === 'xlsx') {
-    required.push('diFile', 'diSheetName');
-  } else {
-    // 腾讯文档模式：链接必填
-    required.push('diDocUrl');
-  }
   if (type === 'product') {
     required.push(
       'diColName', 'diColPrice', 'diColCost', 'diColCategory', 'diColTagline',
@@ -665,74 +801,95 @@ function bindImportFieldClear() {
   });
 }
 
+// 点击「批量上传商品」时，先确认是否已上传待上传商品的图片
+function openImportConfirmModal() {
+  showModal('批量上传商品', `
+    <p style="text-align:center;font-size:15px;line-height:1.6;">是否已经上传了待上传商品的图片？</p>
+  `, `
+    <button class="btn btn-outline" id="importConfirmNo">否</button>
+    <button class="btn btn-primary" id="importConfirmYes">是</button>
+  `);
+  setTimeout(() => {
+    const yes = $('#importConfirmYes');
+    const no = $('#importConfirmNo');
+    if (no) no.onclick = () => {
+      closeModal();
+      showModal('上传提示', `
+        <p style="text-align:center;font-size:15px;line-height:1.6;">请先上传图片再上传商品</p>
+      `, `
+        <button class="btn btn-primary" onclick="closeModal()">好的</button>
+      `);
+    };
+    if (yes) yes.onclick = () => {
+      closeModal();
+      openImportDocModal();
+    };
+  }, 50);
+}
+
 function openImportDocModal() {
-  const d = IMPORT_COL_DEFAULTS.product;
+  const dp = IMPORT_COL_DEFAULTS.product;
+  const dm = IMPORT_COL_DEFAULTS.material;
   showModal('批量上传商品', `
     <div class="import-summary-err" id="diSummaryErr" style="display:none;color:#C0392B;font-size:13px;font-weight:500;margin:0 0 12px;padding:8px 10px;background:rgba(192,57,43,.06);border-radius:8px;"></div>
     <form id="docImportForm">
-      <div class="form-row"><label>数据来源</label>
-        <select id="diSource" class="form-input">
-          <option value="xlsx" selected>本地 Excel 文件</option>
-          <option value="doc">腾讯文档在线表格</option>
-        </select></div>
       <div class="form-row"><label>上传类型</label>
         <select id="diType" class="form-input">
           <option value="product" selected>成品饰品</option>
-          <option value="material">DIY材料（配饰）</option>
+          <option value="material">配饰</option>
         </select></div>
-
-      <!-- 来源：本地 Excel -->
-      <div class="import-source-xlsx">
-        <div class="form-row"><label>上传 Excel 文件</label>
-          <input type="file" id="diFile" accept=".xlsx,.xls" class="form-input"></div>
-        <div class="form-row"><label>工作表名称</label>
-          <input id="diSheetName" class="form-input" value="" placeholder="如 成品-测试（必填）"></div>
-      </div>
-
-      <!-- 来源：腾讯文档（doc 模式仅支持成品，图片列填 URL 文本）-->
-      <div class="import-source-doc" style="display:none">
-        <div class="form-row"><label>腾讯文档链接</label>
-          <input id="diDocUrl" class="form-input" value="" placeholder="https://docs.qq.com/sheet/xxxx?tab=xxx"></div>
-        <p class="import-tip">提示：腾讯文档模式仅支持「成品饰品」。图片列（如 R,S,T,U,V,W）填写<b>图片 URL</b> 文本，系统会自动转存到云存储；内嵌图块也兼容。链接需带 <code>?tab=</code> 指定子表。</p>
-      </div>
 
       <div class="form-row"><label>供应商</label>
         <select id="diSupplier" class="form-input">
           <option value="">请选择供应商</option>
         </select></div>
 
+      <!-- 固定使用腾讯文档在线表格 -->
+      <div class="import-source-doc">
+        <div class="form-row"><label>腾讯文档链接</label>
+          <input id="diDocUrl" class="form-input" value="" placeholder="https://docs.qq.com/sheet/xxxx?tab=xxx"></div>
+      </div>
+
+      <div class="form-row"><label>导入商品数量</label>
+        <input id="diMaxCount" class="form-input" type="number" min="1" value="" placeholder="留空表示全部"></div>
+
       <div class="import-cols import-cols-product">
-        <div class="form-row"><label>商品名列号</label><input id="diColName" class="form-input" value="${d.colName}"></div>
-        <div class="form-row"><label>零售价列号</label><input id="diColPrice" class="form-input" value="${d.colPrice}"></div>
-        <div class="form-row"><label>成本价列号</label><input id="diColCost" class="form-input" value="${d.colCost}" placeholder="单颗/单件成本"></div>
-        <div class="form-row"><label>分类列号</label><input id="diColCategory" class="form-input" value="${d.colCategory}" placeholder="填分类名称"></div>
-        <div class="form-row"><label>推荐语列号</label><input id="diColTagline" class="form-input" value="${d.colTagline}" placeholder="可选；留空由 DS 生成"></div>
-        <div class="form-row"><label>图片列号</label><input id="diColImages" class="form-input" value="${d.colImages}" placeholder="多列多图逗号分隔；内嵌图按行归位"></div>
-        <div class="form-row"><label>珠子尺寸列号</label><input id="diColBeadSize" class="form-input" value="${d.colBeadSize}" placeholder="如 6mm / 8mm"></div>
-        <div class="form-row"><label>五行属列号</label><input id="diColElements" class="form-input" value="${d.colElements}" placeholder="多值逗号分隔"></div>
-        <div class="form-row"><label>首页推荐列号</label><input id="diColHome" class="form-input" value="${d.colHome}" placeholder="TRUE/FALSE"></div>
+        <div class="form-row"><label>商品原名列号</label><input id="diColRawName" class="form-input" value="${dp.colRawName}"></div>
+        <div class="form-row"><label>商品AI名列号</label><input id="diColName" class="form-input" value="${dp.colName}"></div>
+        <div class="form-row"><label>零售原价列号</label><input id="diColRawPrice" class="form-input" value="${dp.colRawPrice}"></div>
+        <div class="form-row"><label>零售现价列号</label><input id="diColPrice" class="form-input" value="${dp.colPrice}"></div>
+        <div class="form-row"><label>成本价列号</label><input id="diColCost" class="form-input" value="${dp.colCost}" placeholder="单颗/单件成本"></div>
+        <div class="form-row"><label>分类列号</label><input id="diColCategory" class="form-input" value="${dp.colCategory}" placeholder="填分类名称"></div>
+        <div class="form-row"><label>推荐语列号</label><input id="diColTagline" class="form-input" value="${dp.colTagline}" placeholder="可选；留空由 DS 生成"></div>
+        <div class="form-row"><label>图片列号</label><input id="diColImages" class="form-input" value="${dp.colImages}" placeholder="多列多图逗号分隔；内嵌图按行归位"></div>
+        <div class="form-row"><label>珠子尺寸列号</label><input id="diColBeadSize" class="form-input" value="${dp.colBeadSize}" placeholder="如 6mm / 8mm"></div>
+        <div class="form-row"><label>五行属列号</label><input id="diColElements" class="form-input" value="${dp.colElements}" placeholder="多值逗号分隔"></div>
+        <div class="form-row"><label>首页推荐列号</label><input id="diColHome" class="form-input" value="${dp.colHome}" placeholder="TRUE/FALSE"></div>
         <div class="form-row"><label>库存列号</label><input id="diColStock" class="form-input" value="暂时不填，库存管够" readonly disabled></div>
       </div>
 
       <div class="import-cols import-cols-material" style="display:none">
-        <div class="form-row"><label>材料名列号</label><input id="diMColName" class="form-input" value="${d.colName}"></div>
-        <div class="form-row"><label>零售价列号</label><input id="diMColPrice" class="form-input" value="${d.colPrice}"></div>
-        <div class="form-row"><label>成本价列号</label><input id="diMColCost" class="form-input" value="${d.colCost}"></div>
-        <div class="form-row"><label>分类列号</label><input id="diMColCategory" class="form-input" value="${d.colCategory}" placeholder="填分类名称"></div>
-        <div class="form-row"><label>配饰图片列号</label><input id="diColTransparent" class="form-input" value="${d.colTransparent}" placeholder="内嵌透明 PNG 所在列"></div>
-        <div class="form-row"><label>横向真实尺寸(mm)列</label><input id="diMColRealW" class="form-input" value="${d.colRealW}" placeholder="用于生成规格(横向*纵向)"></div>
-        <div class="form-row"><label>纵向真实尺寸(mm)列</label><input id="diMColRealH" class="form-input" value="${d.colRealH}" placeholder="圆形仅需横向"></div>
-        <div class="form-row"><label>形状列号</label><input id="diMColShape" class="form-input" value="${d.colShape}" placeholder="如 圆形/圆珠/桶珠/鼓珠"></div>
-        <div class="form-row"><label>穿线方向列</label><input id="diMColThreadDir" class="form-input" value="${d.colThreadDir}" placeholder="前后 / 左右 / 上下"></div>
-        <div class="form-row"><label>穿线宽度(mm)列</label><input id="diMColThreadWidth" class="form-input" value="${d.colThreadWidth}" placeholder="前后方向留空则自动取厚度"></div>
-        <div class="form-row"><label>五行属列号</label><input id="diMColElements" class="form-input" value="${d.colElements}"></div>
-        <div class="form-row"><label>厚度(mm)</label><input id="diMColThickness" class="form-input" value="4" placeholder="默认 4mm，可修改"></div>
-        <div class="form-row"><label>统一像素精度(k px/mm)</label><input id="diMKpxPerMm" class="form-input" value="" placeholder="留空则按原图不放大；填数字(如60)则全局统一比例"></div>
+        <div class="form-row"><label>配饰原名列号</label><input id="diMColRawName" class="form-input" value="${dm.colRawName}"></div>
+        <div class="form-row"><label>配饰AI名列号</label><input id="diMColName" class="form-input" value="${dm.colName}"></div>
+        <div class="form-row"><label>零售原价列号</label><input id="diMColRawPrice" class="form-input" value="${dm.colRawPrice}"></div>
+        <div class="form-row"><label>零售现价列号</label><input id="diMColPrice" class="form-input" value="${dm.colPrice}"></div>
+        <div class="form-row"><label>成本价列号</label><input id="diMColCost" class="form-input" value="${dm.colCost}"></div>
+        <div class="form-row"><label>分类列号</label><input id="diMColCategory" class="form-input" value="${dm.colCategory}" placeholder="填分类名称"></div>
+        <div class="form-row"><label>配饰图片列号</label><input id="diColTransparent" class="form-input" value="${dm.colTransparent}" placeholder="内嵌透明 PNG 所在列"></div>
+        <div class="form-row"><label>横向真实尺寸(mm)列号</label><input id="diMColRealW" class="form-input" value="${dm.colRealW}" placeholder="用于生成规格(横向*纵向)"></div>
+        <div class="form-row"><label>纵向真实尺寸(mm)列号</label><input id="diMColRealH" class="form-input" value="${dm.colRealH}" placeholder="圆形仅需横向"></div>
+        <div class="form-row"><label>形状列号</label><input id="diMColShape" class="form-input" value="${dm.colShape}" placeholder="如 圆形/圆珠/桶珠/鼓珠"></div>
+        <div class="form-row"><label>穿线方向列号</label><input id="diMColThreadDir" class="form-input" value="${dm.colThreadDir}" placeholder="前后 / 左右 / 上下"></div>
+        <div class="form-row"><label>穿线宽度(mm)列号</label><input id="diMColThreadWidth" class="form-input" value="${dm.colThreadWidth}" placeholder="前后方向留空则自动取厚度"></div>
+        <div class="form-row"><label>是否挂坠列号</label><input id="diMColPendant" class="form-input" value="${dm.colPendant}" placeholder="TRUE/是/1 表示挂坠"></div>
+        <div class="form-row"><label>五行属列号</label><input id="diMColElements" class="form-input" value="${dm.colElements}"></div>
+        <div class="form-row"><label>厚度(mm)</label><input id="diMThickness" class="form-input" type="number" value="${dm.thicknessMm}" placeholder="默认 3mm，可修改"></div>
+        <div class="form-row"><label>统一像素精度(k px/mm)</label><input id="diMKpxPerMm" class="form-input" value="${dm.kPxPerMm}" placeholder="留空则按原图不放大；填数字(如60)则全局统一比例"></div>
       </div>
     </form>
   `, `
-    <button class="btn btn-primary" id="docImportStartBtn">开始上传</button>
     <button class="btn btn-outline" onclick="closeModal()">取消</button>
+    <button class="btn btn-primary" id="docImportStartBtn">开始上传</button>
   `);
 
   // 加载供应商列表，填充下拉（直接选供应商，无需在 Excel 里放供应商列）
@@ -751,53 +908,49 @@ function openImportDocModal() {
 
   // 开始上传按钮始终保持可点击：未填写项由点击时的必填校验标红提示，而不是提前禁用按钮。
 
-  // 数据来源切换：显示对应输入组（本地 Excel / 腾讯文档链接）
-  setTimeout(() => {
-    const srcSel = $('#diSource');
-    const xlsxGrp = document.querySelector('.import-source-xlsx');
-    const docGrp = document.querySelector('.import-source-doc');
-    if (srcSel && xlsxGrp && docGrp) {
-      srcSel.onchange = () => {
-        const isDoc = srcSel.value === 'doc';
-        xlsxGrp.style.display = isDoc ? 'none' : '';
-        docGrp.style.display = isDoc ? '' : 'none';
-        // 腾讯文档模式仅支持成品（成品/配饰共用 diType；doc 模式下强制成品）
-        if (isDoc) {
-          const typeSel = $('#diType');
-          if (typeSel) {
-            typeSel.value = 'product';
-            typeSel.dispatchEvent(new Event('change'));
-            typeSel.disabled = true;
-          }
-        } else {
-          const typeSel = $('#diType');
-          if (typeSel) typeSel.disabled = false;
+      // 类型切换：显示对应列组（两组共用 id 的输入框，切换时只切可见性）
+      setTimeout(() => {
+        const typeSel = $('#diType');
+        const grpProduct = document.querySelector('.import-cols-product');
+        const grpMaterial = document.querySelector('.import-cols-material');
+        if (typeSel && grpProduct && grpMaterial) {
+          typeSel.onchange = () => {
+            const isMat = typeSel.value === 'material';
+            grpProduct.style.display = isMat ? 'none' : '';
+            grpMaterial.style.display = isMat ? '' : 'none';
+            // 切换时把对应列组重置为默认列号（库存列号固定只读，不重置；供应商下拉不随类型重置）
+            if (isMat) {
+              const dm = IMPORT_COL_DEFAULTS.material;
+              $('#diMColRawName').value = dm.colRawName;
+              $('#diMColName').value = dm.colName;
+              $('#diMColRawPrice').value = dm.colRawPrice;
+              $('#diMColPrice').value = dm.colPrice;
+              $('#diMColCost').value = dm.colCost;
+              $('#diMColCategory').value = dm.colCategory;
+              $('#diColTransparent').value = dm.colTransparent;
+              $('#diMColRealW').value = dm.colRealW;
+              $('#diMColRealH').value = dm.colRealH;
+              $('#diMColShape').value = dm.colShape;
+              $('#diMColThreadDir').value = dm.colThreadDir;
+              $('#diMColThreadWidth').value = dm.colThreadWidth;
+              $('#diMColPendant').value = dm.colPendant;
+              $('#diMColElements').value = dm.colElements;
+              $('#diMThickness').value = dm.thicknessMm;
+              $('#diMKpxPerMm').value = dm.kPxPerMm;
+            } else {
+              const dp = IMPORT_COL_DEFAULTS.product;
+              $('#diColRawName').value = dp.colRawName;
+              $('#diColName').value = dp.colName;
+              $('#diColRawPrice').value = dp.colRawPrice;
+              $('#diColPrice').value = dp.colPrice;
+              $('#diColCost').value = dp.colCost;
+              $('#diColCategory').value = dp.colCategory;
+              $('#diColImages').value = dp.colImages;
+              $('#diColElements').value = dp.colElements;
+            }
+          };
         }
-      };
-    }
-  }, 10);
-
-  // 类型切换：显示对应列组（两组共用 id 的输入框，切换时只切可见性）
-  setTimeout(() => {
-    const typeSel = $('#diType');
-    const grpProduct = document.querySelector('.import-cols-product');
-    const grpMaterial = document.querySelector('.import-cols-material');
-    if (typeSel && grpProduct && grpMaterial) {
-      typeSel.onchange = () => {
-        const isMat = typeSel.value === 'material';
-        grpProduct.style.display = isMat ? 'none' : '';
-        grpMaterial.style.display = isMat ? '' : 'none';
-        // 切换时把「成品组」输入框重置为成品默认列号（库存列号固定只读，不重置；供应商下拉不随类型重置）
-        const def = IMPORT_COL_DEFAULTS.product;
-        $('#diColName').value = def.colName;
-        $('#diColPrice').value = def.colPrice;
-        $('#diColCost').value = def.colCost;
-        $('#diColCategory').value = def.colCategory;
-        $('#diColImages').value = def.colImages;
-        $('#diColElements').value = def.colElements;
-      };
-    }
-  }, 10);
+      }, 10);
 
   // 开始上传按钮：同步绑定（紧跟 showModal 后 DOM 已就绪），避免 setTimeout 时序竞态导致点击无响应
   bindImportFieldClear();
@@ -820,20 +973,22 @@ function openImportDocModal() {
         }
         if (summary) summary.style.display = 'none';
 
-        const source = $('#diSource') ? $('#diSource').value : 'xlsx';
         const supplierId = $('#diSupplier') ? $('#diSupplier').value : '';
         const type = $('#diType').value;
+        const docUrl = $('#diDocUrl').value.trim();
+        if (!docUrl) { showToast('请填写腾讯文档链接', 'error'); return; }
 
-        if (source === 'doc') {
-          const docUrl = $('#diDocUrl').value.trim();
-          if (!docUrl) { showToast('请填写腾讯文档链接', 'error'); return; }
-          if (type !== 'product') { showToast('腾讯文档模式仅支持成品饰品', 'error'); return; }
-          // ===== 腾讯文档在线表格模式：直接调用后端读取，无需上传文件 =====
-          const payload = { source: 'doc', type: 'product', docUrl, supplierId };
+        // 固定腾讯文档在线表格模式
+        const maxCountRaw = $('#diMaxCount').value.trim();
+        const maxCount = maxCountRaw ? parseInt(maxCountRaw, 10) : 0;
+        const payload = { source: 'doc', type, docUrl, supplierId, maxCount };
 
+        if (type === 'product') {
           // 列号映射（成品列，含图片列 R~W 等）
           Object.assign(payload, {
+            colRawName: $('#diColRawName').value.trim(),
             colName: $('#diColName').value.trim(),
+            colRawPrice: $('#diColRawPrice').value.trim(),
             colPrice: $('#diColPrice').value.trim(),
             colCost: $('#diColCost').value.trim(),
             colStock: $('#diColStock').value.trim(),
@@ -844,77 +999,12 @@ function openImportDocModal() {
             colElements: $('#diColElements').value.trim(),
             colHome: $('#diColHome').value.trim(),
           });
-          const colParams = { ...payload };
-          delete colParams.source; delete colParams.docUrl; delete colParams.supplierId;
-
-          // 创建上传任务记录（用于「上传历史」追溯）
-          let taskId = '';
-          try {
-            const tRes = await apiCall('importTaskManager', {
-              action: 'create',
-              account: (AUTH_TOKEN ? 'admin' : ''),
-              fileName: docUrl,
-              fileSize: 0,
-              type: 'product',
-              sheetName: '(腾讯文档)',
-              supplierId,
-              params: colParams,
-            });
-            taskId = (tRes && tRes.taskId) || '';
-          } catch (e) {
-            showToast('创建上传任务失败: ' + e.message, 'error');
-            btn.disabled = false; btn.textContent = '开始上传';
-            return;
-          }
-          if (taskId) payload.taskId = taskId;
-
-          closeModal();
-          showToast('上传任务已提交，正在读取腾讯文档', 'success');
-          // 不 await：后端通过 upload_tasks 回写状态
-          apiCall('importFromTencentDoc', payload).catch((e) => {
-            console.error('[上传任务] 后端执行异常', taskId, e);
-          });
-          return;
-        }
-
-        // ===== 本地 Excel 模式 =====
-        const fileInput = $('#diFile');
-        const file = fileInput && fileInput.files && fileInput.files[0];
-        if (!file) { showToast('请先选择 Excel 文件', 'error'); return; }
-        const sheetName = $('#diSheetName').value.trim();
-        if (!sheetName) { showToast('请填写工作表名称', 'error'); return; }
-
-        const payload = {
-          source: 'xlsx',
-          type,
-          sheetName,
-          supplierId,
-        };
-
-        // 列号映射（完整传入 importFromTencentDoc，也写入任务记录供追溯）
-        const colParams = {};
-        if (type === 'product') {
-          Object.assign(payload, colParams, {
-            colName: $('#diColName').value.trim(),
-            colPrice: $('#diColPrice').value.trim(),
-            colCost: $('#diColCost').value.trim(),
-            colStock: $('#diColStock').value.trim(), // 只读固定 'J'，库存管够
-            colCategory: $('#diColCategory').value.trim(),
-            colImages: $('#diColImages').value.trim(),
-            colBeadSize: $('#diColBeadSize').value.trim(),
-            colTagline: $('#diColTagline').value.trim(),
-            colElements: $('#diColElements').value.trim(),
-            colHome: $('#diColHome').value.trim(),
-          });
-          Object.assign(colParams, {
-            colName: payload.colName, colPrice: payload.colPrice, colCost: payload.colCost,
-            colStock: payload.colStock, colCategory: payload.colCategory, colImages: payload.colImages,
-            colBeadSize: payload.colBeadSize, colTagline: payload.colTagline,
-            colElements: payload.colElements, colHome: payload.colHome,
-          });
         } else {
+          // 配饰列号映射
           Object.assign(payload, {
+            colRawName: $('#diMColRawName').value.trim(),
             colName: $('#diMColName').value.trim(),
+            colRawPrice: $('#diMColRawPrice').value.trim(),
             colPrice: $('#diMColPrice').value.trim(),
             colCost: $('#diMColCost').value.trim(),
             colCategory: $('#diMColCategory').value.trim(),
@@ -923,33 +1013,26 @@ function openImportDocModal() {
             colRealH: $('#diMColRealH').value.trim(),
             colShape: $('#diMColShape').value.trim(),
             colThreadDir: $('#diMColThreadDir').value.trim(),
-            colThickness: $('#diMColThickness').value.trim(),
             colThreadWidth: $('#diMColThreadWidth').value.trim(),
+            colPendant: $('#diMColPendant').value.trim(),
             colElements: $('#diMColElements').value.trim(),
-          });
-          // 统一像素精度：留空则后端按 safe_k（不放大）；填数字则全局统一比例
-          const kVal = parseFloat($('#diMKpxPerMm').value);
-          if (!isNaN(kVal) && kVal > 0) payload.kPxPerMm = kVal;
-          Object.assign(colParams, {
-            colName: payload.colName, colPrice: payload.colPrice, colCost: payload.colCost,
-            colCategory: payload.colCategory, colTransparent: payload.colTransparent,
-            colRealW: payload.colRealW, colRealH: payload.colRealH, colShape: payload.colShape,
-            colThreadDir: payload.colThreadDir, colThickness: payload.colThickness,
-            colThreadWidth: payload.colThreadWidth, colElements: payload.colElements,
-            kPxPerMm: payload.kPxPerMm,
+            thicknessMm: parseFloat($('#diMThickness').value) || 3,
+            kPxPerMm: $('#diMKpxPerMm').value.trim(),
           });
         }
+        const colParams = { ...payload };
+        delete colParams.source; delete colParams.docUrl; delete colParams.supplierId;
 
-        // 1) 先建上传任务记录
+        // 创建上传任务记录（用于「上传历史」追溯）
         let taskId = '';
         try {
           const tRes = await apiCall('importTaskManager', {
             action: 'create',
             account: (AUTH_TOKEN ? 'admin' : ''),
-            fileName: file.name,
-            fileSize: file.size,
+            fileName: docUrl,
+            fileSize: 0,
             type,
-            sheetName,
+            sheetName: '(腾讯文档)',
             supplierId,
             params: colParams,
           });
@@ -961,34 +1044,12 @@ function openImportDocModal() {
         }
         if (taskId) payload.taskId = taskId;
 
-        // 2) 立即关闭弹窗，给用户即时反馈；后续上传在后台执行
         closeModal();
-        showToast('上传任务已提交，处理中', 'success');
-
-        // 3) 后台执行：分片上传 → 调用导入（通过 upload_tasks 回写进度/结果）
-        (async () => {
-          try {
-            // 上传前先把任务状态标记为"上传中"
-            apiCall('importTaskManager', { action: 'update', taskId, status: 'uploading', log: '文件分片上传中' }).catch(() => {});
-            payload.xlsxFileIDList = await uploadFileToCloud(file, (done, total) => {
-              // 可选：把上传进度写回任务日志，方便「上传历史」刷新查看
-              console.log(`[上传任务 ${taskId}] 上传中 ${done}/${total}`);
-            });
-          } catch (e) {
-            showToast('上传文件失败: ' + e.message, 'error');
-            console.error('[上传任务] 上传失败', taskId, e);
-            return;
-          }
-
-          try {
-            // 不 await 最终结果：后端会通过 upload_tasks 回写状态
-            apiCall('importFromTencentDoc', payload).catch((e) => {
-              console.error('[上传任务] 后端执行异常', taskId, e);
-            });
-          } catch (e) {
-            console.error('[上传任务] 提交失败', taskId, e);
-          }
-        })();
+        showToast('上传任务已提交，可到【上传历史】页面查看任务进度', 'success');
+        // 不 await：后端通过 upload_tasks 回写状态
+        apiCall('importFromTencentDoc', payload).catch((e) => {
+          console.error('[上传任务] 后端执行异常', taskId, e);
+        });
       } catch (e) {
         // 顶层兜底：任何未预期异常都给出反馈，避免"点击无反应"
         console.error('[上传] 未预期异常:', e);
@@ -998,3 +1059,238 @@ function openImportDocModal() {
     };
   }
 }
+
+// ========== 上传商品图片：腾讯文档 → 云存储 → 回写文档 ==========
+
+function openUploadImagesModal() {
+  $('#uploadImagesModal').style.display = 'flex';
+  $('#uiResult').innerHTML = '';
+  $('#uiProgressWrap').style.display = 'none';
+  $('#uiProgressBar').style.width = '0%';
+  $('#uiProgressText').textContent = '';
+  $('#uiFileHint').textContent = '未选择目录';
+  $('#uiFileInput').value = '';
+  $('#uploadImagesCancel').style.display = '';
+  $('#uploadImagesStart').style.display = '';
+  $('#uploadImagesStart').disabled = false;
+  $('#uploadImagesStart').textContent = '开始上传';
+  $('#uploadImagesDone').style.display = 'none';
+  const summary = $('#uiSummaryErr');
+  if (summary) summary.style.display = 'none';
+
+  // 根据上传类型动态切换标签与默认图片数
+  const typeSel = $('#uiType');
+  const applyType = () => {
+    const isMat = typeSel && typeSel.value === 'material';
+    const colLabel = $('#uiColNameLabel');
+    if (colLabel) colLabel.textContent = isMat ? '配饰名列号' : '商品名列号';
+    const per = $('#uiImagesPer');
+    if (per) per.value = isMat ? '1' : '6';
+  };
+  if (typeSel) {
+    // 重置为成品默认值（弹窗每次打开都重置）
+    typeSel.value = 'product';
+    typeSel.onchange = applyType;
+  }
+  applyType();
+
+  // 输入即清除红色边框
+  document.querySelectorAll('#uploadImagesModal .form-input').forEach((el) => {
+    const evt = (el.type === 'file' || el.tagName === 'SELECT') ? 'change' : 'input';
+    el.addEventListener(evt, () => {
+      const v = el.type === 'file' ? (el.files && el.files[0]) : el.value.trim();
+      const empty = el.type === 'file' ? !v : (el.tagName === 'SELECT' ? el.value === '' : v === '');
+      if (!empty) {
+        el.classList.remove('upload-invalid');
+        el.style.borderColor = '';
+        el.style.background = '';
+      }
+    });
+  });
+}
+
+function closeUploadImagesModal() {
+  $('#uploadImagesModal').style.display = 'none';
+}
+
+// 上传商品图片弹窗必填校验：返回未填字段 id 列表
+function validateUploadImagesForm() {
+  const required = ['uiDocUrl', 'uiColName', 'uiImagesPer', 'uiWriteStart', 'uiFileInput'];
+  const invalid = [];
+  required.forEach((fieldId) => {
+    const el = $('#' + fieldId);
+    let empty = false;
+    if (!el) empty = true;
+    else if (el.type === 'file') empty = !(el.files && el.files[0]);
+    else if (el.tagName === 'SELECT') empty = el.value === '';
+    else empty = el.value.trim() === '';
+    if (el) {
+      el.classList.toggle('upload-invalid', empty);
+      if (empty) {
+        el.style.borderColor = '#C0392B';
+        el.style.background = 'rgba(192,57,43,.04)';
+      } else {
+        el.style.borderColor = '';
+        el.style.background = '';
+      }
+    }
+    if (empty) invalid.push(fieldId);
+  });
+  return invalid;
+}
+
+// 文件名首段数字（下划线前），用于全局序号分组：1_~6_=商品1, 7_~12_=商品2...
+function fileGlobalSeq(file) {
+  const m = (file.name || '').match(/^(\d+)_/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
+// 把商品名转为云存储安全路径段（去掉 / \ : * ? " < > | # % 等）
+function sanitizeCloudName(name) {
+  return String(name || '').replace(/[\\/:*?"<>|#%{}]/g, '_').replace(/_{2,}/g, '_').slice(0, 60) || 'unknown';
+}
+
+// 上传单个文件到 COS（直接走 uploadProductImageToCos HTTP 触发器，二进制直传）
+async function uploadImageFile(file, cloudPath) {
+  const token = localStorage.getItem('seller_token') || '';
+  const qs = `_adminToken=${encodeURIComponent(token)}&fileName=${encodeURIComponent(file.name)}&cloudPath=${encodeURIComponent(cloudPath)}`;
+  const url = `${API_BASE}/uploadProductImageToCos?${qs}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const json = await res.json().catch(() => ({ code: -1, message: '响应解析失败' }));
+  if (json.code !== 0) throw new Error(json.message || '上传失败');
+  if (!json.data || !json.data.url) throw new Error('未返回图片 URL');
+  return json.data.url;
+}
+
+function setUploadProgress(done, total, text) {
+  $('#uiProgressWrap').style.display = 'block';
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  $('#uiProgressBar').style.width = pct + '%';
+  $('#uiProgressText').textContent = text || `${done}/${total}`;
+}
+
+async function startUploadImages() {
+  // 必填校验
+  const invalid = validateUploadImagesForm();
+  const summary = $('#uiSummaryErr');
+  if (invalid.length) {
+    if (summary) {
+      summary.textContent = `还有 ${invalid.length} 项必填未填写（已标红），请补全后再上传`;
+      summary.style.display = 'block';
+    }
+    const first = $('#' + invalid[0]);
+    if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    return;
+  }
+  if (summary) summary.style.display = 'none';
+
+  const docUrl = $('#uiDocUrl').value.trim();
+  const colName = $('#uiColName').value.trim() || 'A';
+  const imagesPer = Math.max(1, parseInt($('#uiImagesPer').value, 10) || 6);
+  const writeStart = $('#uiWriteStart').value.trim() || 'X';
+  const uploadType = $('#uiType') ? $('#uiType').value : 'product';
+  // COS 子路径：成品走 images/products，配饰走 images/materials
+  const cosSubPath = uploadType === 'material' ? 'images/materials' : 'images/products';
+  const files = Array.from($('#uiFileInput').files || []);
+
+  $('#uiResult').innerHTML = '';
+
+  // 过滤出图片文件（webkitdirectory 可能带回 .DS_Store 等非图片文件）
+  const imageFiles = files.filter((f) => /^image\//i.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(f.name));
+  if (!imageFiles.length) { showToast('所选目录下未找到图片文件', 'error'); return; }
+
+  // 单图过大提示（base64 后有体积膨胀，避免超出云函数入参上限）
+  const tooLarge = imageFiles.filter((f) => f.size > 4 * 1024 * 1024);
+  if (tooLarge.length) {
+    showToast(`有 ${tooLarge.length} 张图片超过 4MB，可能上传失败，建议压缩后重试`, 'info');
+  }
+
+  const btn = $('#uploadImagesStart');
+  btn.disabled = true; btn.textContent = '处理中...';
+
+  try {
+    // 1) 读取腾讯文档商品名列表
+    setUploadProgress(0, 1, '正在读取腾讯文档商品名...');
+    const prep = await apiCall('prepareProductImageUpload', { docUrl, colName });
+    const products = (prep && prep.products) || [];
+    if (!products.length) throw new Error('腾讯文档未读取到商品名，请检查链接与商品名列号');
+
+    // 2) 校验文件数
+    const expectTotal = products.length * imagesPer;
+    if (imageFiles.length !== expectTotal) {
+      throw new Error(`文件数量不匹配：文档 ${products.length} 个商品 × ${imagesPer} 张 = ${expectTotal} 张，但目录下找到 ${imageFiles.length} 张图片`);
+    }
+
+    // 3) 按文件名首段数字排序（全局序号）
+    const sorted = imageFiles.slice().sort((a, b) => fileGlobalSeq(a) - fileGlobalSeq(b));
+    const bad = sorted.filter((f) => isNaN(fileGlobalSeq(f)));
+    if (bad.length) {
+      throw new Error(`有 ${bad.length} 个文件未按 "序号_名称" 命名（如 1_xxx.png），无法分组`);
+    }
+
+    // 4) 逐张上传到 images/products/<商品名>/<文件名>
+    const fileIDList = new Array(sorted.length);
+    for (let i = 0; i < sorted.length; i++) {
+      const f = sorted[i];
+      const globalSeq = fileGlobalSeq(f);
+      const productIdx = Math.floor((globalSeq - 1) / imagesPer); // 0 基商品索引
+      const productName = (products[productIdx] && products[productIdx].name) || ('商品' + (productIdx + 1));
+      const cloudPath = `${cosSubPath}/${sanitizeCloudName(productName)}/${f.name.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_')}`;
+      setUploadProgress(i, sorted.length, `正在上传第 ${i + 1}/${sorted.length} 张：${f.name}`);
+      let fid = '';
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          fid = await uploadImageFile(f, cloudPath);
+          break;
+        } catch (e) {
+          if (attempt === 2) throw new Error(`上传 ${f.name} 失败: ${e.message}`);
+          await new Promise((r) => setTimeout(r, 800));
+        }
+      }
+      fileIDList[i] = fid;
+    }
+
+    // 5) 回写到腾讯文档 X~AC 列（后台异步执行，避免云函数 3 秒超时阻塞弹窗）
+    setUploadProgress(sorted.length, sorted.length, '图片已上传，正在后台回写腾讯文档...');
+    apiCall('writeProductImageUrls', {
+      docUrl, colName, imagesPerProduct: imagesPer, writeStartCol: writeStart, fileIDList,
+    }).catch((e) => {
+      console.error('[回写腾讯文档] 提交异常', e);
+    });
+
+    const total = products.length;
+    $('#uiResult').innerHTML = `<div class="upload-result-ok">✅ 已上传 ${total}/${total} 个商品的图片，正在后台回写腾讯文档，请稍后去文档中确认。</div>`;
+    showToast(`上传完成，正在后台回写文档`, 'success');
+    // 成功后只保留"完成"按钮
+    $('#uploadImagesCancel').style.display = 'none';
+    $('#uploadImagesStart').style.display = 'none';
+    $('#uploadImagesDone').style.display = '';
+  } catch (e) {
+    console.error('[上传商品图片] 失败', e);
+    $('#uiResult').innerHTML = `<div class="upload-result-err">❌ ${e.message}</div>`;
+    showToast('上传失败: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '开始上传';
+  }
+}
+
+// 弹窗关闭/取消/开始/完成 绑定
+$('#uploadImagesClose').addEventListener('click', closeUploadImagesModal);
+$('#uploadImagesCancel').addEventListener('click', closeUploadImagesModal);
+$('#uploadImagesDone').addEventListener('click', closeUploadImagesModal);
+$('#uploadImagesStart').addEventListener('click', startUploadImages);
+$('#uploadImagesModal').addEventListener('click', (e) => {
+  if (e.target === $('#uploadImagesModal')) closeUploadImagesModal();
+});
+$('#uiFileInput').addEventListener('change', (e) => {
+  const n = (e.target.files || []).length;
+  $('#uiFileHint').textContent = n ? `已选择目录（${n} 个文件）` : '未选择目录';
+});
