@@ -1151,15 +1151,25 @@ function sanitizeCloudName(name) {
 }
 
 // 上传单个文件到 COS（直接走 uploadProductImageToCos HTTP 触发器，二进制直传）
+// 关键：给 fetch 加 AbortSignal.timeout，避免高并发下部分请求被网关静默挂起
+// （既不 resolve 也不 reject）导致并发池整体卡死、进度永远停在某个数字。
+const UPLOAD_TIMEOUT_MS = 30000; // 单张上传 30s 超时，超时即失败进入重试/报错
 async function uploadImageFile(file, cloudPath) {
   const token = localStorage.getItem('seller_token') || '';
   const qs = `_adminToken=${encodeURIComponent(token)}&fileName=${encodeURIComponent(file.name)}&cloudPath=${encodeURIComponent(cloudPath)}`;
   const url = `${API_BASE}/uploadProductImageToCos?${qs}`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': file.type || 'application/octet-stream' },
-    body: file,
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+    });
+  } catch (e) {
+    // 超时 / 网络中断 / 连接被网关断开 都会走到这里，统一抛错由上层重试
+    throw new Error(`请求异常(${e && e.name === 'TimeoutError' ? '超时' : (e && e.message) || '网络错误'})`);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
@@ -1298,13 +1308,13 @@ async function startUploadImages() {
       return { f, cloudPath };
     });
 
-    // 并发度：浏览器对同一域名的并发连接数存在硬约束（HTTP/1.1 通常 6，
-    // HTTP/2 下多路复用可更高，但网关仍会限流），经验甜点区约 30~50，
-    // 超过后边际收益骤降甚至因连接排队/超时回退。这里取有效上限 50，
-    // 并支持通过 localStorage.seller_upload_concurrency 在运行时覆盖（便于试不同档位）。
+    // 并发度：浏览器对同一域名的并发连接数有硬约束（Chrome 默认 6），
+    // 超过后多余请求排队等待空闲连接，反而易被网关空闲超时静默挂起（即本次卡死的根因）。
+    // 因此默认取安全的 6 路；若部署在支持 HTTP/2 多路复用的网关且想拉满，
+    // 可在控制台执行 localStorage.setItem('seller_upload_concurrency', 20) 自行试档位。
     const MAX_CONCURRENCY = 50;
     let CONCURRENCY = parseInt(localStorage.getItem('seller_upload_concurrency'), 10);
-    if (!Number.isFinite(CONCURRENCY) || CONCURRENCY < 1) CONCURRENCY = MAX_CONCURRENCY;
+    if (!Number.isFinite(CONCURRENCY) || CONCURRENCY < 1) CONCURRENCY = 6; // 默认安全值，避免一上来就卡死
     CONCURRENCY = Math.min(CONCURRENCY, MAX_CONCURRENCY);
     const uploadResults = await runPool(uploadPlan, CONCURRENCY, async (item) => {
       const { f, cloudPath } = item;
@@ -1314,7 +1324,9 @@ async function startUploadImages() {
           return await uploadImageFile(f, cloudPath);
         } catch (e) {
           if (attempt === 2) throw new Error(`上传 ${f.name} 失败: ${e.message}`);
-          await new Promise((r) => setTimeout(r, 800));
+          // 退避：超时/网络类错误稍长，给网关和连接池喘息
+          const isTimeout = /超时|网络错误|TimeoutError/.test(e.message);
+          await new Promise((r) => setTimeout(r, isTimeout ? 1500 : 800));
         }
       }
     }, (done, total) => {
