@@ -1079,6 +1079,8 @@ function openUploadImagesModal() {
   $('#uploadImagesTerminate').textContent = '终止任务'; // 复位可能的“终止中…”残留
   _uploadCancelled = false; // 重新打开清空上次的终止状态
   _uploadAbortController = null; // 旧任务已结束，避免残留 controller 干扰关闭判断
+  _uploadCurrentTaskId = null;
+  _renderUploadHistory(); // 打开弹窗即展示历史（含可终止的进行中任务）
   const summary = $('#uiSummaryErr');
   if (summary) summary.style.display = 'none';
 
@@ -1116,6 +1118,62 @@ function openUploadImagesModal() {
 // 上传任务的全局取消令牌：点“终止任务”时 abort()，所有进行中/后续的 fetch 立即中断
 let _uploadAbortController = null;
 let _uploadCancelled = false;
+let _uploadCurrentTaskId = null;
+// 上传历史：内存 Map 存 controller 引用（仅当前会话可终止），localStorage 存摘要可查看
+const _uploadTasks = new Map();
+const UPLOAD_HISTORY_KEY = 'seller_upload_history';
+
+function _saveUploadHistory(taskId, info) {
+  try {
+    const list = JSON.parse(localStorage.getItem(UPLOAD_HISTORY_KEY) || '[]');
+    const idx = list.findIndex((t) => t.id === taskId);
+    const entry = Object.assign({ id: taskId }, info);
+    if (idx >= 0) list[idx] = entry; else list.unshift(entry);
+    // 最多保留 20 条
+    localStorage.setItem(UPLOAD_HISTORY_KEY, JSON.stringify(list.slice(0, 20)));
+  } catch (e) { /* 忽略持久化异常 */ }
+}
+
+function _updateUploadHistoryStatus(taskId, status) {
+  _saveUploadHistory(taskId, { status });
+  const t = _uploadTasks.get(taskId);
+  if (t) t.status = status;
+}
+
+function _renderUploadHistory() {
+  const wrap = $('#uploadHistoryWrap');
+  const listEl = $('#uploadHistoryList');
+  if (!wrap || !listEl) return;
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem(UPLOAD_HISTORY_KEY) || '[]'); } catch (e) {}
+  if (!list.length) { wrap.style.display = 'none'; listEl.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  listEl.innerHTML = list.map((t) => {
+    const statusText = { running: '进行中', done: '已完成', failed: '失败', cancelled: '已终止' }[t.status] || t.status;
+    const canTerminate = t.status === 'running';
+    return `<div class="upload-history-item">
+      <span class="uh-time">${t.time || ''}</span>
+      <span class="uh-info">${t.total || '?'} 个商品</span>
+      <span class="uh-status uh-${t.status}">${statusText}</span>
+      ${canTerminate ? `<button class="btn btn-danger btn-xs" data-terminate="${t.id}">终止</button>` : ''}
+    </div>`;
+  }).join('');
+  // 绑定历史中的“终止”按钮：只对本会话内且仍 running 的任务有效
+  listEl.querySelectorAll('[data-terminate]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-terminate');
+      const t = _uploadTasks.get(id);
+      if (!t || !t.controller || t.status !== 'running') {
+        showToast('该任务已不在进行中或页面已刷新，无法终止', 'info');
+        return;
+      }
+      t.controller.abort();
+      _updateUploadHistoryStatus(id, 'cancelled');
+      _renderUploadHistory();
+      showToast('已终止历史任务', 'info');
+    });
+  });
+}
 
 // 强制终止正在进行的上传任务（仅终止，不关闭弹窗，便于查看已上传进度）
 function terminateUploadTask() {
@@ -1123,7 +1181,9 @@ function terminateUploadTask() {
   _uploadCancelled = true;
   _uploadAbortController.abort();
   $('#uploadImagesTerminate').style.display = 'none';
-  $('#uploadImagesTerminate').textContent = '终止中…';
+  $('#uploadImagesTerminate').textContent = '终止任务';
+  if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'cancelled');
+  _renderUploadHistory();
   showToast('已发送终止指令，正在中止上传…', 'info');
 }
 
@@ -1315,6 +1375,12 @@ async function startUploadImages() {
   // 初始化本次上传的取消令牌（每次开始重新建，避免上次的 abort 状态残留）
   _uploadAbortController = new AbortController();
   _uploadCancelled = false;
+  const _taskId = 'task_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+  _uploadCurrentTaskId = _taskId;
+  // 登记到上传历史（内存 Map 仅当前会话可终止；localStorage 存摘要可查看）
+  _uploadTasks.set(_taskId, { controller: _uploadAbortController, status: 'running', time: new Date().toLocaleString(), total: totalProducts });
+  _saveUploadHistory(_taskId, { status: 'running', time: new Date().toLocaleString(), total: totalProducts, docUrl });
+  _renderUploadHistory();
   const abortSignal = _uploadAbortController.signal;
 
   try {
@@ -1402,7 +1468,7 @@ async function startUploadImages() {
     // 5) 分批回写到腾讯文档（避免单次云函数调用超时中断）
     //    云函数默认执行超时较短，一次性回写几十个商品（每张图都要签名+回写请求）
     //    极易超时只写一部分。改为每批 BATCH 个商品循环调用，单批轻量不超时。
-    const BATCH = 5; // 每批处理的商品数（5 商品 × 6 图 = 30 次签名 + 5 次回写，远在超时内）
+    const BATCH = 3; // 每批处理的商品数（3 商品 × 6 图 = 18 次签名 + 3 次回写，确保在网关 3s 超时内同步返回）
     const totalProducts = products.length;
     let writtenOk = 0;
     const writeFail = [];
@@ -1410,6 +1476,7 @@ async function startUploadImages() {
     for (let sp = 0; sp < totalProducts; sp += BATCH) {
       const cnt = Math.min(BATCH, totalProducts - sp);
       const batchFileIDs = fileIDList.slice(sp * imagesPer, (sp + cnt) * imagesPer);
+      console.log(`[回写] 开始第 ${sp + 1}-${sp + cnt} 个商品 (startProduct=${sp}, count=${cnt}, fileIDs=${batchFileIDs.length})`);
       let ok = false;
       for (let attempt = 0; attempt < 3 && !ok; attempt++) {
         try {
@@ -1418,12 +1485,14 @@ async function startUploadImages() {
             fileIDList: batchFileIDs, startProduct: sp, count: cnt,
           });
           const d = (r && r.data) || {};
+          console.log(`[回写] 第 ${sp + 1}-${sp + cnt} 个商品 返回:`, JSON.stringify(d));
           writtenOk += (d.success || 0);
           if (d.failList && d.failList.length) {
             d.failList.forEach((f) => writeFail.push(`行${f.row}:${f.reason}`));
           }
           ok = true;
         } catch (e) {
+          console.error(`[回写] 第 ${sp + 1}-${sp + cnt} 个商品 异常(attempt ${attempt + 1}):`, e && e.message);
           if (attempt === 2) {
             writeFail.push(`第${sp + 1}-${sp + cnt}个商品回写异常: ${e.message}`);
           } else {
@@ -1434,15 +1503,24 @@ async function startUploadImages() {
       setUploadProgress(sorted.length, sorted.length,
         `正在回写腾讯文档 ${Math.min(sp + cnt, totalProducts)}/${totalProducts} 个商品...`);
     }
+    console.log(`[回写] 全部批次结束: writtenOk=${writtenOk}, writeFail=${writeFail.length}`);
 
     const total = products.length;
     if (writeFail.length) {
       $('#uiResult').innerHTML = `<div class="upload-result-warn">⚠️ 图片已上传，回写完成但 ${writeFail.length} 处失败：${writeFail.slice(0, 5).join('；')}${writeFail.length > 5 ? '…' : ''}，请检查文档或重试</div>`;
       showToast(`回写完成，${writeFail.length} 处失败`, 'info');
+      if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'failed');
     } else {
       $('#uiResult').innerHTML = `<div class="upload-result-ok">✅ 已上传并回写 ${total}/${total} 个商品的图片到腾讯文档。</div>`;
       showToast(`上传+回写完成`, 'success');
+      if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'done');
     }
+    _renderUploadHistory();
+    // 任务彻底完成：进度置 100%、清除“正在回写…”残留文字，并清空 controller，
+    // 这样关闭弹窗时不会再误提示“上传任务仍在进行中”。
+    setUploadProgress(sorted.length, sorted.length, '已完成');
+    _uploadAbortController = null;
+    _uploadCancelled = false;
     // 成功后只保留"完成"按钮
     $('#uploadImagesCancel').style.display = 'none';
     $('#uploadImagesStart').style.display = 'none';
@@ -1453,6 +1531,11 @@ async function startUploadImages() {
     $('#uiResult').innerHTML = `<div class="upload-result-err">❌ ${e.message}</div>`;
     showToast('上传失败: ' + e.message, 'error');
     $('#uploadImagesTerminate').style.display = 'none';
+    if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'failed');
+    _renderUploadHistory();
+    // 失败也视为任务结束，清空 controller 避免关闭弹窗时误提示“仍在进行中”
+    _uploadAbortController = null;
+    _uploadCancelled = false;
   } finally {
     btn.disabled = false; btn.textContent = '开始上传';
   }

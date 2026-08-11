@@ -601,6 +601,20 @@ input, select, textarea { font-family: inherit; }
 .upload-result-ok { color: var(--green); font-size: 14px; font-weight: 600; }
 .upload-result-err { color: #C0392B; font-size: 13px; margin-top: 8px; line-height: 1.7; }
 
+/* ========== 上传历史 ========== */
+.upload-history { margin-top: 16px; border-top: 1px solid #eee; padding-top: 12px; }
+.upload-history-title { font-size: 13px; font-weight: 600; color: var(--text-light); margin-bottom: 8px; }
+.upload-history-item { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; font-size: 12px; }
+.upload-history-item:nth-child(odd) { background: #f7f8fa; }
+.upload-history-item .uh-time { color: var(--text-light); min-width: 120px; }
+.upload-history-item .uh-info { flex: 1; }
+.upload-history-item .uh-status { font-weight: 600; }
+.upload-history-item .uh-running { color: #E69500; }
+.upload-history-item .uh-done { color: var(--green); }
+.upload-history-item .uh-failed { color: #C0392B; }
+.upload-history-item .uh-cancelled { color: #888; }
+.upload-history-item .btn-xs { padding: 3px 10px; font-size: 12px; margin-left: auto; }
+
 /* ========== 销售趋势折线图 ========== */
 .chart-card {
   background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
