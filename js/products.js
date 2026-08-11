@@ -1075,6 +1075,10 @@ function openUploadImagesModal() {
   $('#uploadImagesStart').disabled = false;
   $('#uploadImagesStart').textContent = '开始上传';
   $('#uploadImagesDone').style.display = 'none';
+  $('#uploadImagesTerminate').style.display = 'none'; // 终止任务仅上传进行中可见
+  $('#uploadImagesTerminate').textContent = '终止任务'; // 复位可能的“终止中…”残留
+  _uploadCancelled = false; // 重新打开清空上次的终止状态
+  _uploadAbortController = null; // 旧任务已结束，避免残留 controller 干扰关闭判断
   const summary = $('#uiSummaryErr');
   if (summary) summary.style.display = 'none';
 
@@ -1109,7 +1113,28 @@ function openUploadImagesModal() {
   });
 }
 
+// 上传任务的全局取消令牌：点“终止任务”时 abort()，所有进行中/后续的 fetch 立即中断
+let _uploadAbortController = null;
+let _uploadCancelled = false;
+
+// 强制终止正在进行的上传任务（仅终止，不关闭弹窗，便于查看已上传进度）
+function terminateUploadTask() {
+  if (!_uploadAbortController || _uploadCancelled) return;
+  _uploadCancelled = true;
+  _uploadAbortController.abort();
+  $('#uploadImagesTerminate').style.display = 'none';
+  $('#uploadImagesTerminate').textContent = '终止中…';
+  showToast('已发送终止指令，正在中止上传…', 'info');
+}
+
 function closeUploadImagesModal() {
+  // 取消 = 仅关闭弹窗。若上传仍在进行，提示用户用“终止任务”先停掉，避免后台偷偷继续跑
+  if (_uploadAbortController && !_uploadCancelled) {
+    if (!confirm('上传任务仍在进行中，直接关闭弹窗不会终止上传。确定要关闭吗？（可重新打开弹窗点“终止任务”中止）')) {
+      return;
+    }
+    showToast('弹窗已关闭，但上传仍在后台进行，请重新打开并点“终止任务”', 'info');
+  }
   $('#uploadImagesModal').style.display = 'none';
 }
 
@@ -1151,24 +1176,31 @@ function sanitizeCloudName(name) {
 }
 
 // 上传单个文件到 COS（直接走 uploadProductImageToCos HTTP 触发器，二进制直传）
-// 关键：给 fetch 加 AbortSignal.timeout，避免高并发下部分请求被网关静默挂起
-// （既不 resolve 也不 reject）导致并发池整体卡死、进度永远停在某个数字。
+// 关键：signal 合并「全局取消令牌」+「30s 超时」，既支持点取消即时中断，
+// 也避免高并发下请求被网关静默挂起导致并发池整体卡死。
 const UPLOAD_TIMEOUT_MS = 30000; // 单张上传 30s 超时，超时即失败进入重试/报错
-async function uploadImageFile(file, cloudPath) {
+async function uploadImageFile(file, cloudPath, abortSignal) {
   const token = localStorage.getItem('seller_token') || '';
   const qs = `_adminToken=${encodeURIComponent(token)}&fileName=${encodeURIComponent(file.name)}&cloudPath=${encodeURIComponent(cloudPath)}`;
   const url = `${API_BASE}/uploadProductImageToCos?${qs}`;
+  // 合并全局取消信号与超时信号（任一触发即中断本次 fetch）
+  const signal = abortSignal
+    ? AbortSignal.any([abortSignal, AbortSignal.timeout(UPLOAD_TIMEOUT_MS)])
+    : AbortSignal.timeout(UPLOAD_TIMEOUT_MS);
   let res;
   try {
     res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': file.type || 'application/octet-stream' },
       body: file,
-      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+      signal,
     });
   } catch (e) {
-    // 超时 / 网络中断 / 连接被网关断开 都会走到这里，统一抛错由上层重试
-    throw new Error(`请求异常(${e && e.name === 'TimeoutError' ? '超时' : (e && e.message) || '网络错误'})`);
+    // 超时 / 网络中断 / 连接被网关断开 / 用户取消 都会走到这里，统一抛错由上层重试或终止
+    const reason = e && e.name === 'AbortError'
+      ? '已取消'
+      : (e && e.name === 'TimeoutError' ? '超时' : (e && e.message) || '网络错误');
+    throw new Error(`请求异常(${reason})`);
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -1209,12 +1241,14 @@ async function compressImage(file, { maxEdge = 1280, quality = 0.8, type = 'imag
 }
 
 // 并发池：对 items 执行 asyncFn，限制并发数 concurrency，支持逐条进度回调
-async function runPool(items, concurrency, asyncFn, onProgress) {
+// shouldStop：返回 true 时，worker 不再派发新任务（用于“取消”即时终止）
+async function runPool(items, concurrency, asyncFn, onProgress, shouldStop) {
   const results = new Array(items.length);
   let cursor = 0;
   let done = 0;
   async function worker() {
     while (cursor < items.length) {
+      if (shouldStop && shouldStop()) break; // 取消后不再取新任务
       const idx = cursor++;
       try {
         results[idx] = await asyncFn(items[idx], idx);
@@ -1276,6 +1310,12 @@ async function startUploadImages() {
 
   const btn = $('#uploadImagesStart');
   btn.disabled = true; btn.textContent = '处理中...';
+  $('#uploadImagesTerminate').style.display = ''; // 上传进行中显示“终止任务”
+
+  // 初始化本次上传的取消令牌（每次开始重新建，避免上次的 abort 状态残留）
+  _uploadAbortController = new AbortController();
+  _uploadCancelled = false;
+  const abortSignal = _uploadAbortController.signal;
 
   try {
     // 1) 读取腾讯文档商品名列表
@@ -1320,9 +1360,12 @@ async function startUploadImages() {
       const { f, cloudPath } = item;
       // 不压缩，原图直传（保留透明背景/原画质）
       for (let attempt = 0; attempt < 3; attempt++) {
+        // 用户已点取消：直接抛错退出，不再重试、不再发起新请求
+        if (abortSignal.aborted) throw new Error('已取消');
         try {
-          return await uploadImageFile(f, cloudPath);
+          return await uploadImageFile(f, cloudPath, abortSignal);
         } catch (e) {
+          if (abortSignal.aborted) throw new Error('已取消');
           if (attempt === 2) throw new Error(`上传 ${f.name} 失败: ${e.message}`);
           // 退避：超时/网络类错误稍长，给网关和连接池喘息
           const isTimeout = /超时|网络错误|TimeoutError/.test(e.message);
@@ -1331,14 +1374,27 @@ async function startUploadImages() {
       }
     }, (done, total) => {
       setUploadProgress(done, total, `正在上传 ${done}/${total} 张（并发 ${CONCURRENCY}）`);
-    });
+    }, () => _uploadCancelled); // 取消后不再派发新任务
 
     const fileIDList = uploadResults;
     // 收集可能存在的单张失败（runPool 已吞掉异常，这里统一报错）
     const failed = [];
+    const cancelled = [];
     uploadResults.forEach((v, i) => {
-      if (v && v.__error) failed.push(sorted[i].name + ':' + (v.__error.message || v.__error));
+      if (v && v.__error) {
+        const msg = v.__error.message || String(v.__error);
+        if (/已取消/.test(msg)) cancelled.push(sorted[i].name);
+        else failed.push(sorted[i].name + ':' + msg);
+      }
     });
+    if (_uploadCancelled) {
+      // 用户主动取消：不报“失败”，直接以取消状态结束
+      const termBtn = $('#uploadImagesTerminate');
+      if (termBtn) termBtn.textContent = '终止任务';
+      $('#uiResult').innerHTML = `<div class="upload-result-warn">⏹ 已取消，共上传 ${sorted.length - failed.length - cancelled.length}/${sorted.length} 张后终止。</div>`;
+      showToast('上传任务已终止', 'info');
+      return;
+    }
     if (failed.length) {
       throw new Error(`有 ${failed.length} 张上传失败：${failed.slice(0, 3).join('；')}${failed.length > 3 ? '…' : ''}`);
     }
@@ -1357,19 +1413,22 @@ async function startUploadImages() {
     // 成功后只保留"完成"按钮
     $('#uploadImagesCancel').style.display = 'none';
     $('#uploadImagesStart').style.display = 'none';
+    $('#uploadImagesTerminate').style.display = 'none';
     $('#uploadImagesDone').style.display = '';
   } catch (e) {
     console.error('[上传商品图片] 失败', e);
     $('#uiResult').innerHTML = `<div class="upload-result-err">❌ ${e.message}</div>`;
     showToast('上传失败: ' + e.message, 'error');
+    $('#uploadImagesTerminate').style.display = 'none';
   } finally {
     btn.disabled = false; btn.textContent = '开始上传';
   }
 }
 
-// 弹窗关闭/取消/开始/完成 绑定
+// 弹窗关闭/取消/终止/开始/完成 绑定
 $('#uploadImagesClose').addEventListener('click', closeUploadImagesModal);
 $('#uploadImagesCancel').addEventListener('click', closeUploadImagesModal);
+$('#uploadImagesTerminate').addEventListener('click', terminateUploadTask);
 $('#uploadImagesDone').addEventListener('click', closeUploadImagesModal);
 $('#uploadImagesStart').addEventListener('click', startUploadImages);
 $('#uploadImagesModal').addEventListener('click', (e) => {
