@@ -1399,17 +1399,50 @@ async function startUploadImages() {
       throw new Error(`有 ${failed.length} 张上传失败：${failed.slice(0, 3).join('；')}${failed.length > 3 ? '…' : ''}`);
     }
 
-    // 5) 回写到腾讯文档 X~AC 列（后台异步执行，避免云函数 3 秒超时阻塞弹窗）
-    setUploadProgress(sorted.length, sorted.length, '图片已上传，正在后台回写腾讯文档...');
-    apiCall('writeProductImageUrls', {
-      docUrl, colName, imagesPerProduct: imagesPer, writeStartCol: writeStart, fileIDList,
-    }).catch((e) => {
-      console.error('[回写腾讯文档] 提交异常', e);
-    });
+    // 5) 分批回写到腾讯文档（避免单次云函数调用超时中断）
+    //    云函数默认执行超时较短，一次性回写几十个商品（每张图都要签名+回写请求）
+    //    极易超时只写一部分。改为每批 BATCH 个商品循环调用，单批轻量不超时。
+    const BATCH = 5; // 每批处理的商品数（5 商品 × 6 图 = 30 次签名 + 5 次回写，远在超时内）
+    const totalProducts = products.length;
+    let writtenOk = 0;
+    const writeFail = [];
+    setUploadProgress(sorted.length, sorted.length, '图片已上传，正在回写腾讯文档...');
+    for (let sp = 0; sp < totalProducts; sp += BATCH) {
+      const cnt = Math.min(BATCH, totalProducts - sp);
+      const batchFileIDs = fileIDList.slice(sp * imagesPer, (sp + cnt) * imagesPer);
+      let ok = false;
+      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        try {
+          const r = await apiCall('writeProductImageUrls', {
+            docUrl, colName, imagesPerProduct: imagesPer, writeStartCol: writeStart,
+            fileIDList: batchFileIDs, startProduct: sp, count: cnt,
+          });
+          const d = (r && r.data) || {};
+          writtenOk += (d.success || 0);
+          if (d.failList && d.failList.length) {
+            d.failList.forEach((f) => writeFail.push(`行${f.row}:${f.reason}`));
+          }
+          ok = true;
+        } catch (e) {
+          if (attempt === 2) {
+            writeFail.push(`第${sp + 1}-${sp + cnt}个商品回写异常: ${e.message}`);
+          } else {
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+        }
+      }
+      setUploadProgress(sorted.length, sorted.length,
+        `正在回写腾讯文档 ${Math.min(sp + cnt, totalProducts)}/${totalProducts} 个商品...`);
+    }
 
     const total = products.length;
-    $('#uiResult').innerHTML = `<div class="upload-result-ok">✅ 已上传 ${total}/${total} 个商品的图片，正在后台回写腾讯文档，请稍后去文档中确认。</div>`;
-    showToast(`上传完成，正在后台回写文档`, 'success');
+    if (writeFail.length) {
+      $('#uiResult').innerHTML = `<div class="upload-result-warn">⚠️ 图片已上传，回写完成但 ${writeFail.length} 处失败：${writeFail.slice(0, 5).join('；')}${writeFail.length > 5 ? '…' : ''}，请检查文档或重试</div>`;
+      showToast(`回写完成，${writeFail.length} 处失败`, 'info');
+    } else {
+      $('#uiResult').innerHTML = `<div class="upload-result-ok">✅ 已上传并回写 ${total}/${total} 个商品的图片到腾讯文档。</div>`;
+      showToast(`上传+回写完成`, 'success');
+    }
     // 成功后只保留"完成"按钮
     $('#uploadImagesCancel').style.display = 'none';
     $('#uploadImagesStart').style.display = 'none';
