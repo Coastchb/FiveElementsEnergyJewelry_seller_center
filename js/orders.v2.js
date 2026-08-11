@@ -256,8 +256,12 @@ function renderOrderList(container, list, type) {
       ? '<span class="order-tag tag-diy">DIY</span>'
       : '<span class="order-tag tag-product">成品</span>';
 
-    const diyHtml = isDiy && o.diyMaterials
-      ? `<div class="diy-detail-box"><strong>配饰：</strong>${o.diyMaterials}</div>` : '';
+    const diyHtml = isDiy
+      ? `<div class="diy-detail-box">`
+        + (o.selectedSize ? `<div><strong>手围：</strong>${o.selectedSize}</div>` : '')
+        + (o.diyMaterials ? `<div><strong>配饰汇总：</strong>${o.diyMaterials}</div>` : '')
+        + (o.diyMaterialDetail ? `<div><strong>配饰详情：</strong>${o.diyMaterialDetail}</div>` : '')
+        + `</div>` : '';
 
     // 面单 / 发货操作（仅待发货订单）
     let waybillHtml = '';

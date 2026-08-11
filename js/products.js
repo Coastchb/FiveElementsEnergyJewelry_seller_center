@@ -1170,6 +1170,57 @@ async function uploadImageFile(file, cloudPath) {
   return json.data.url;
 }
 
+// 浏览器端压缩图片：长边缩到 maxEdge，质量 quality，输出目标类型的 Blob。
+// 不支持的格式（如 heic）/ 解码失败时原样返回，保证不丢图。
+async function compressImage(file, { maxEdge = 1280, quality = 0.8, type = 'image/jpeg' } = {}) {
+  // 跳过明显无需压缩的小图（< 300KB）直接原图上传
+  if (file.size <= 300 * 1024) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close && bitmap.close();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+    if (!blob) return file;
+    // 压缩后反而更大（极端情况）则退回原图
+    if (blob.size >= file.size) return file;
+    const ext = type === 'image/png' ? 'png' : 'jpg';
+    const name = (file.name || 'image').replace(/\.[^.]+$/, '') + '.' + ext;
+    return new File([blob], name, { type });
+  } catch (e) {
+    console.warn('[压缩] 失败，回退原图:', e && e.message);
+    return file;
+  }
+}
+
+// 并发池：对 items 执行 asyncFn，限制并发数 concurrency，支持逐条进度回调
+async function runPool(items, concurrency, asyncFn, onProgress) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  let done = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      try {
+        results[idx] = await asyncFn(items[idx], idx);
+      } catch (e) {
+        results[idx] = { __error: e };
+      }
+      done++;
+      if (onProgress) onProgress(done, items.length);
+    }
+  }
+  const pool = [];
+  for (let i = 0; i < Math.min(concurrency, items.length); i++) pool.push(worker());
+  await Promise.all(pool);
+  return results;
+}
+
 function setUploadProgress(done, total, text) {
   $('#uiProgressWrap').style.display = 'block';
   const pct = total ? Math.round((done / total) * 100) : 0;
@@ -1207,10 +1258,10 @@ async function startUploadImages() {
   const imageFiles = files.filter((f) => /^image\//i.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(f.name));
   if (!imageFiles.length) { showToast('所选目录下未找到图片文件', 'error'); return; }
 
-  // 单图过大提示（base64 后有体积膨胀，避免超出云函数入参上限）
+  // 单图体积提示（原图直传，超大图可能受网关限制）
   const tooLarge = imageFiles.filter((f) => f.size > 4 * 1024 * 1024);
   if (tooLarge.length) {
-    showToast(`有 ${tooLarge.length} 张图片超过 4MB，可能上传失败，建议压缩后重试`, 'info');
+    showToast(`有 ${tooLarge.length} 张图片超过 4MB，超大图可能上传较慢或失败`, 'info');
   }
 
   const btn = $('#uploadImagesStart');
@@ -1236,26 +1287,48 @@ async function startUploadImages() {
       throw new Error(`有 ${bad.length} 个文件未按 "序号_名称" 命名（如 1_xxx.png），无法分组`);
     }
 
-    // 4) 逐张上传到 images/products/<商品名>/<文件名>
-    const fileIDList = new Array(sorted.length);
-    for (let i = 0; i < sorted.length; i++) {
-      const f = sorted[i];
+    // 4) 并发压缩 + 并发上传到 images/products/<商品名>/<文件名>
+    //    先按文件名分组算好每张的目标 cloudPath（压缩后文件名会变，但路径已锁定），
+    //    再以并发池（压缩+上传）执行，避免逐张串行的长时间等待。
+    const uploadPlan = sorted.map((f) => {
       const globalSeq = fileGlobalSeq(f);
       const productIdx = Math.floor((globalSeq - 1) / imagesPer); // 0 基商品索引
       const productName = (products[productIdx] && products[productIdx].name) || ('商品' + (productIdx + 1));
       const cloudPath = `${cosSubPath}/${sanitizeCloudName(productName)}/${f.name.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_')}`;
-      setUploadProgress(i, sorted.length, `正在上传第 ${i + 1}/${sorted.length} 张：${f.name}`);
-      let fid = '';
+      return { f, cloudPath };
+    });
+
+    // 并发度：浏览器对同一域名的并发连接数存在硬约束（HTTP/1.1 通常 6，
+    // HTTP/2 下多路复用可更高，但网关仍会限流），经验甜点区约 30~50，
+    // 超过后边际收益骤降甚至因连接排队/超时回退。这里取有效上限 50，
+    // 并支持通过 localStorage.seller_upload_concurrency 在运行时覆盖（便于试不同档位）。
+    const MAX_CONCURRENCY = 50;
+    let CONCURRENCY = parseInt(localStorage.getItem('seller_upload_concurrency'), 10);
+    if (!Number.isFinite(CONCURRENCY) || CONCURRENCY < 1) CONCURRENCY = MAX_CONCURRENCY;
+    CONCURRENCY = Math.min(CONCURRENCY, MAX_CONCURRENCY);
+    const uploadResults = await runPool(uploadPlan, CONCURRENCY, async (item) => {
+      const { f, cloudPath } = item;
+      // 不压缩，原图直传（保留透明背景/原画质）
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          fid = await uploadImageFile(f, cloudPath);
-          break;
+          return await uploadImageFile(f, cloudPath);
         } catch (e) {
           if (attempt === 2) throw new Error(`上传 ${f.name} 失败: ${e.message}`);
           await new Promise((r) => setTimeout(r, 800));
         }
       }
-      fileIDList[i] = fid;
+    }, (done, total) => {
+      setUploadProgress(done, total, `正在上传 ${done}/${total} 张（并发 ${CONCURRENCY}）`);
+    });
+
+    const fileIDList = uploadResults;
+    // 收集可能存在的单张失败（runPool 已吞掉异常，这里统一报错）
+    const failed = [];
+    uploadResults.forEach((v, i) => {
+      if (v && v.__error) failed.push(sorted[i].name + ':' + (v.__error.message || v.__error));
+    });
+    if (failed.length) {
+      throw new Error(`有 ${failed.length} 张上传失败：${failed.slice(0, 3).join('；')}${failed.length > 3 ? '…' : ''}`);
     }
 
     // 5) 回写到腾讯文档 X~AC 列（后台异步执行，避免云函数 3 秒超时阻塞弹窗）
