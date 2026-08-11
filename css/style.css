@@ -412,7 +412,9 @@ input, select, textarea { font-family: inherit; }
 .task-status-running { background: #fff7e6; color: #d48806; }
 .task-status-success { background: #f6ffed; color: #52c41a; }
 .task-status-failed { background: #fff1f0; color: #f5222d; }
+.task-status-cancelled { background: #f5f5f5; color: #888; }
 .task-file-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-op-disabled { color: #c0c0c0; font-size: 12px; }
 .task-file-size { font-size: 12px; color: var(--text-muted); margin: 2px 0; }
 .task-file-dl { font-size: 12px; color: var(--primary); }
 .task-file-dl.disabled { color: var(--text-muted); }

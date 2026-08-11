@@ -8,11 +8,13 @@ const TASK_STATUS_TEXT = {
   running: '解析/写入中',
   success: '成功',
   failed: '失败',
+  cancelled: '已取消',
 };
 
 const TASK_TYPE_TEXT = {
   product: '成品',
   material: '配饰',
+  image: '图片',
 };
 
 // 根据后端状态和 result 汇总，返回更友好的状态文本
@@ -88,17 +90,19 @@ function stopTaskPolling() {
 
 async function loadTaskHistory() {
   const body = $('#taskBody');
-  if (body) body.innerHTML = '<tr><td colspan="9" class="empty-state">加载中...</td></tr>';
+  if (body) body.innerHTML = '<tr><td colspan="10" class="empty-state">加载中...</td></tr>';
   try {
     const res = await apiCall('importTaskManager', { action: 'list', limit: 50 });
     const list = (res && res.list) || [];
     if (!list.length) {
-      if (body) body.innerHTML = '<tr><td colspan="9" class="empty-state">暂无上传任务</td></tr>';
+      if (body) body.innerHTML = '<tr><td colspan="10" class="empty-state">暂无上传任务</td></tr>';
       stopTaskPolling();
       return;
     }
     if (body) {
-      body.innerHTML = list.map((t) => `
+      body.innerHTML = list.map((t) => {
+        const canTerminate = t.status === 'pending' || t.status === 'running' || t.status === 'uploading';
+        return `
         <tr>
           <td><code>${escapeHtml(t.taskId)}</code></td>
           <td>${fmtTaskTime(t.createdAt)}</td>
@@ -117,15 +121,22 @@ async function loadTaskHistory() {
           <td>${fmtTaskTime(t.finishedAt)}</td>
           <td>${statusBadge(t)}</td>
           <td>
+            ${canTerminate ? `<button class="btn btn-sm btn-danger" data-task-terminate="${escapeHtml(t.taskId)}" data-task-type="${escapeHtml(t.type || '')}">终止任务</button>` : '<span class="task-op-disabled">—</span>'}
+          </td>
+          <td>
             <button class="btn btn-sm btn-outline" data-task-log="${escapeHtml(t.taskId)}">查看日志</button>
           </td>
         </tr>
-      `).join('');
+      `;
+      }).join('');
       body.querySelectorAll('[data-task-log]').forEach((btn) => {
         btn.addEventListener('click', () => showTaskLog(btn.dataset.taskLog));
       });
       body.querySelectorAll('[data-task-param]').forEach((btn) => {
         btn.addEventListener('click', () => showTaskParams(btn.dataset.taskParam));
+      });
+      body.querySelectorAll('[data-task-terminate]').forEach((btn) => {
+        btn.addEventListener('click', () => terminateHistoryTask(btn.dataset.taskTerminate, btn.dataset.taskType));
       });
     }
     // 若存在处理中的任务，自动轮询刷新；否则停止轮询
@@ -133,9 +144,36 @@ async function loadTaskHistory() {
     if (hasRunning) startTaskPolling();
     else stopTaskPolling();
   } catch (e) {
-    if (body) body.innerHTML = `<tr><td colspan="9" class="empty-state">加载失败：${escapeHtml(e.message)}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="10" class="empty-state">加载失败：${escapeHtml(e.message)}</td></tr>`;
     stopTaskPolling();
   }
+}
+
+async function terminateHistoryTask(taskId, type) {
+  if (!taskId) return;
+  if (!confirm('确定要终止该任务吗？\n图片类任务会立即中断当前会话的上传；其他任务会被标记为“已取消”，后台是否立即停下取决于执行逻辑。')) return;
+
+  // 图片上传任务：若当前浏览器会话仍在运行，先 abort 前端 fetch/controller
+  if (type === 'image') {
+    const t = _uploadTasks && _uploadTasks.get(taskId);
+    if (t && t.controller && t.status !== 'cancelled') {
+      t.controller.abort();
+    }
+  }
+
+  try {
+    await apiCall('importTaskManager', {
+      action: 'update',
+      taskId,
+      status: 'cancelled',
+      finishedAt: Date.now(),
+      log: type === 'image' ? '用户在上传历史页终止图片上传任务' : '用户在上传历史页标记取消任务',
+    });
+    showToast('已终止任务', 'success');
+  } catch (e) {
+    showToast('终止任务失败：' + e.message, 'error');
+  }
+  loadTaskHistory();
 }
 
 async function showTaskLog(taskId) {

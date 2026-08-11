@@ -1080,7 +1080,6 @@ function openUploadImagesModal() {
   _uploadCancelled = false; // 重新打开清空上次的终止状态
   _uploadAbortController = null; // 旧任务已结束，避免残留 controller 干扰关闭判断
   _uploadCurrentTaskId = null;
-  _renderUploadHistory(); // 打开弹窗即展示历史（含可终止的进行中任务）
   const summary = $('#uiSummaryErr');
   if (summary) summary.style.display = 'none';
 
@@ -1118,61 +1117,25 @@ function openUploadImagesModal() {
 // 上传任务的全局取消令牌：点“终止任务”时 abort()，所有进行中/后续的 fetch 立即中断
 let _uploadAbortController = null;
 let _uploadCancelled = false;
+// 当前图片上传任务在后端 upload_tasks 中的 taskId
 let _uploadCurrentTaskId = null;
-// 上传历史：内存 Map 存 controller 引用（仅当前会话可终止），localStorage 存摘要可查看
-const _uploadTasks = new Map();
-const UPLOAD_HISTORY_KEY = 'seller_upload_history';
+// 内存 Map：backendTaskId -> { controller, status, type }
+// 仅当前浏览器会话可终止，页面刷新后 controller 丢失，只能在上传历史页标记取消
+var _uploadTasks = new Map();
 
-function _saveUploadHistory(taskId, info) {
-  try {
-    const list = JSON.parse(localStorage.getItem(UPLOAD_HISTORY_KEY) || '[]');
-    const idx = list.findIndex((t) => t.id === taskId);
-    const entry = Object.assign({ id: taskId }, info);
-    if (idx >= 0) list[idx] = entry; else list.unshift(entry);
-    // 最多保留 20 条
-    localStorage.setItem(UPLOAD_HISTORY_KEY, JSON.stringify(list.slice(0, 20)));
-  } catch (e) { /* 忽略持久化异常 */ }
-}
-
-function _updateUploadHistoryStatus(taskId, status) {
-  _saveUploadHistory(taskId, { status });
+// 同步更新后端 upload_tasks 任务状态/结果/日志（失败仅打印，不影响主流程）
+async function _updateBackendTask(taskId, status, result, log) {
+  if (!taskId) return;
   const t = _uploadTasks.get(taskId);
   if (t) t.status = status;
-}
-
-function _renderUploadHistory() {
-  const wrap = $('#uploadHistoryWrap');
-  const listEl = $('#uploadHistoryList');
-  if (!wrap || !listEl) return;
-  let list = [];
-  try { list = JSON.parse(localStorage.getItem(UPLOAD_HISTORY_KEY) || '[]'); } catch (e) {}
-  if (!list.length) { wrap.style.display = 'none'; listEl.innerHTML = ''; return; }
-  wrap.style.display = 'block';
-  listEl.innerHTML = list.map((t) => {
-    const statusText = { running: '进行中', done: '已完成', failed: '失败', cancelled: '已终止' }[t.status] || t.status;
-    const canTerminate = t.status === 'running';
-    return `<div class="upload-history-item">
-      <span class="uh-time">${t.time || ''}</span>
-      <span class="uh-info">${t.total || '?'} 个商品</span>
-      <span class="uh-status uh-${t.status}">${statusText}</span>
-      ${canTerminate ? `<button class="btn btn-danger btn-xs" data-terminate="${t.id}">终止</button>` : ''}
-    </div>`;
-  }).join('');
-  // 绑定历史中的“终止”按钮：只对本会话内且仍 running 的任务有效
-  listEl.querySelectorAll('[data-terminate]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const id = btn.getAttribute('data-terminate');
-      const t = _uploadTasks.get(id);
-      if (!t || !t.controller || t.status !== 'running') {
-        showToast('该任务已不在进行中或页面已刷新，无法终止', 'info');
-        return;
-      }
-      t.controller.abort();
-      _updateUploadHistoryStatus(id, 'cancelled');
-      _renderUploadHistory();
-      showToast('已终止历史任务', 'info');
-    });
-  });
+  try {
+    const payload = { action: 'update', taskId, status, finishedAt: Date.now() };
+    if (result) payload.result = result;
+    if (log) payload.log = log;
+    await apiCall('importTaskManager', payload);
+  } catch (e) {
+    console.error('[taskUpdate] 失败', taskId, e);
+  }
 }
 
 // 强制终止正在进行的上传任务（仅终止，不关闭弹窗，便于查看已上传进度）
@@ -1182,8 +1145,7 @@ function terminateUploadTask() {
   _uploadAbortController.abort();
   $('#uploadImagesTerminate').style.display = 'none';
   $('#uploadImagesTerminate').textContent = '终止任务';
-  if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'cancelled');
-  _renderUploadHistory();
+  if (_uploadCurrentTaskId) _updateBackendTask(_uploadCurrentTaskId, 'cancelled', null, '用户从弹窗终止任务');
   showToast('已发送终止指令，正在中止上传…', 'info');
 }
 
@@ -1368,19 +1330,39 @@ async function startUploadImages() {
     showToast(`有 ${tooLarge.length} 张图片超过 4MB，超大图可能上传较慢或失败`, 'info');
   }
 
+  const totalFileSize = imageFiles.reduce((sum, f) => sum + (f.size || 0), 0);
+  const fileNameText = `${imageFiles.length} 张图片（${uploadType === 'material' ? '配饰' : '成品'}）`;
   const btn = $('#uploadImagesStart');
+
+  // 创建后端任务记录，统一在上传历史页面追溯
+  let backendTaskId = '';
+  try {
+    const tRes = await apiCall('importTaskManager', {
+      action: 'create',
+      account: (AUTH_TOKEN ? 'admin' : ''),
+      fileName: fileNameText,
+      fileSize: totalFileSize,
+      type: 'image',
+      sheetName: docUrl,
+      supplierId: '',
+      params: { docUrl, colName, imagesPer, writeStartCol: writeStart, uploadType },
+    });
+    backendTaskId = (tRes && tRes.taskId) || '';
+  } catch (e) {
+    showToast('创建上传任务失败: ' + e.message, 'error');
+    btn.disabled = false; btn.textContent = '开始上传';
+    return;
+  }
+  _uploadCurrentTaskId = backendTaskId;
+
   btn.disabled = true; btn.textContent = '处理中...';
   $('#uploadImagesTerminate').style.display = ''; // 上传进行中显示“终止任务”
 
   // 初始化本次上传的取消令牌（每次开始重新建，避免上次的 abort 状态残留）
   _uploadAbortController = new AbortController();
   _uploadCancelled = false;
-  const _taskId = 'task_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-  _uploadCurrentTaskId = _taskId;
-  // 登记到上传历史（内存 Map 仅当前会话可终止；localStorage 存摘要可查看）
-  _uploadTasks.set(_taskId, { controller: _uploadAbortController, status: 'running', time: new Date().toLocaleString(), total: totalProducts });
-  _saveUploadHistory(_taskId, { status: 'running', time: new Date().toLocaleString(), total: totalProducts, docUrl });
-  _renderUploadHistory();
+  _uploadTasks.set(backendTaskId, { controller: _uploadAbortController, status: 'uploading', type: 'image' });
+  _updateBackendTask(backendTaskId, 'uploading', null, '开始读取腾讯文档商品名');
   const abortSignal = _uploadAbortController.signal;
 
   try {
@@ -1459,6 +1441,7 @@ async function startUploadImages() {
       if (termBtn) termBtn.textContent = '终止任务';
       $('#uiResult').innerHTML = `<div class="upload-result-warn">⏹ 已取消，共上传 ${sorted.length - failed.length - cancelled.length}/${sorted.length} 张后终止。</div>`;
       showToast('上传任务已终止', 'info');
+      if (_uploadCurrentTaskId) _updateBackendTask(_uploadCurrentTaskId, 'cancelled', { uploaded: sorted.length - failed.length - cancelled.length, total: sorted.length }, '用户在上传图片阶段终止任务');
       return;
     }
     if (failed.length) {
@@ -1473,6 +1456,7 @@ async function startUploadImages() {
     let writtenOk = 0;
     const writeFail = [];
     setUploadProgress(sorted.length, sorted.length, '图片已上传，正在回写腾讯文档...');
+    if (_uploadCurrentTaskId) _updateBackendTask(_uploadCurrentTaskId, 'uploading', null, `图片已上传（${fileIDList.length} 个 fileID），开始回写腾讯文档`);
     for (let sp = 0; sp < totalProducts; sp += BATCH) {
       const cnt = Math.min(BATCH, totalProducts - sp);
       const batchFileIDs = fileIDList.slice(sp * imagesPer, (sp + cnt) * imagesPer);
@@ -1509,13 +1493,12 @@ async function startUploadImages() {
     if (writeFail.length) {
       $('#uiResult').innerHTML = `<div class="upload-result-warn">⚠️ 图片已上传，回写完成但 ${writeFail.length} 处失败：${writeFail.slice(0, 5).join('；')}${writeFail.length > 5 ? '…' : ''}，请检查文档或重试</div>`;
       showToast(`回写完成，${writeFail.length} 处失败`, 'info');
-      if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'failed');
+      if (_uploadCurrentTaskId) _updateBackendTask(_uploadCurrentTaskId, 'failed', { total, success: total - writeFail.length, failCount: writeFail.length }, `回写完成，${writeFail.length} 处失败`);
     } else {
       $('#uiResult').innerHTML = `<div class="upload-result-ok">✅ 已上传并回写 ${total}/${total} 个商品的图片到腾讯文档。</div>`;
       showToast(`上传+回写完成`, 'success');
-      if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'done');
+      if (_uploadCurrentTaskId) _updateBackendTask(_uploadCurrentTaskId, 'success', { total, success: total, failCount: 0 }, '上传+回写完成');
     }
-    _renderUploadHistory();
     // 任务彻底完成：进度置 100%、清除“正在回写…”残留文字，并清空 controller，
     // 这样关闭弹窗时不会再误提示“上传任务仍在进行中”。
     setUploadProgress(sorted.length, sorted.length, '已完成');
@@ -1531,8 +1514,10 @@ async function startUploadImages() {
     $('#uiResult').innerHTML = `<div class="upload-result-err">❌ ${e.message}</div>`;
     showToast('上传失败: ' + e.message, 'error');
     $('#uploadImagesTerminate').style.display = 'none';
-    if (_uploadCurrentTaskId) _updateUploadHistoryStatus(_uploadCurrentTaskId, 'failed');
-    _renderUploadHistory();
+    if (_uploadCurrentTaskId) {
+      const status = _uploadCancelled ? 'cancelled' : 'failed';
+      _updateBackendTask(_uploadCurrentTaskId, status, null, e.message || '上传失败');
+    }
     // 失败也视为任务结束，清空 controller 避免关闭弹窗时误提示“仍在进行中”
     _uploadAbortController = null;
     _uploadCancelled = false;
