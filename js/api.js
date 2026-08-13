@@ -17,8 +17,11 @@ function _fmtTime(ts) {
 
 // ========== 鉴权 ==========
 let AUTH_TOKEN = localStorage.getItem('seller_token') || '';
+const SESSION_KEY = 'seller_session';
 
 function setToken(t) { AUTH_TOKEN = t; if(t) localStorage.setItem('seller_token', t); else localStorage.removeItem('seller_token'); }
+function setSession(session) { if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session)); else localStorage.removeItem(SESSION_KEY); }
+function getSession() { try { return JSON.parse(localStorage.getItem(SESSION_KEY) || '{}'); } catch(e) { return {}; } }
 
 async function apiCall(fnName, data = {}) {  if (MOCK) return mockCall(fnName, data);
   // 真实后端：login 映射到 adminLogin 云函数，直接调；其他管理接口走 adminApiGateway 网关

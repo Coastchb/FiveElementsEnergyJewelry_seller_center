@@ -374,7 +374,7 @@ input, select, textarea { font-family: inherit; }
 
 /* ========== Data Table ========== */
 .table-wrap { overflow-x: auto; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); }
-.data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 14px; table-layout: fixed; }
 .data-table th {
   text-align: left; padding: 12px 16px; background: #fafaf8;
   color: var(--text-light); font-weight: 600; font-size: 13px;
@@ -393,6 +393,23 @@ input, select, textarea { font-family: inherit; }
 /* 商品管理表格：除商品名称外，其余单元格不换行，避免供应商/状态等列被挤换行 */
 .product-table td { white-space: nowrap; }
 .product-table td:nth-child(2) { white-space: normal; }
+.product-table td:nth-child(4) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 商品管理表格列宽 */
+.product-table th:nth-child(1), .product-table td:nth-child(1) { width: 40px; }
+.product-table th:nth-child(2), .product-table td:nth-child(2) { width: 220px; }
+.product-table th:nth-child(3), .product-table td:nth-child(3) { width: 60px; }
+.product-table th:nth-child(4), .product-table td:nth-child(4) { width: 120px; }
+.product-table th:nth-child(5), .product-table td:nth-child(5) { width: 80px; }
+.product-table th:nth-child(6), .product-table td:nth-child(6) { width: 80px; }
+.product-table th:nth-child(7), .product-table td:nth-child(7) { width: 70px; }
+.product-table th:nth-child(8), .product-table td:nth-child(8) { width: 100px; }
+.product-table th:nth-child(9), .product-table td:nth-child(9) { width: 80px; }
+.product-table th:nth-child(10), .product-table td:nth-child(10) { width: 80px; }
+.product-table th:nth-child(11), .product-table td:nth-child(11) { width: 120px; }
 .action-link:hover { text-decoration: underline; }
 .action-link.danger { color: #f56c6c; }
 
@@ -415,6 +432,42 @@ input, select, textarea { font-family: inherit; }
 .task-status-cancelled { background: #f5f5f5; color: #888; }
 .task-file-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-op-disabled { color: #c0c0c0; font-size: 12px; }
+.task-ops { white-space: nowrap; }
+.task-ops .btn { margin-right: 6px; }
+.task-ops .btn:last-child { margin-right: 0; }
+
+/* 上传历史列宽 */
+.data-table th:nth-child(1), .data-table td:nth-child(1) { width: 160px; } /* 任务ID */
+.data-table th:nth-child(2), .data-table td:nth-child(2),
+.data-table th:nth-child(6), .data-table td:nth-child(6) { width: 110px; } /* 提交/结束时间 */
+.data-table th:nth-child(3), .data-table td:nth-child(3) { width: 90px; }  /* 操作人 */
+.data-table th:nth-child(4), .data-table td:nth-child(4) { width: 80px; }  /* 上传类型 */
+.data-table th:nth-child(5), .data-table td:nth-child(5) { width: 200px; } /* 参数 */
+.data-table th:nth-child(7), .data-table td:nth-child(7) { width: 90px; }  /* 状态 */
+.data-table th:nth-child(8), .data-table td:nth-child(8),
+.data-table th:nth-child(9), .data-table td:nth-child(9) { width: 100px; } /* 操作/日志 */
+
+.task-id-cell { word-break: break-all; line-height: 1.4; }
+.task-id-cell code {
+  background: transparent; padding: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--text-main); font-size: 13px;
+}
+.task-time-cell { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+.task-time-cell .task-date { color: var(--text-secondary); }
+.task-time-cell .task-clock { color: var(--text-muted); font-size: 11px; }
+.task-params-cell {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.task-params-cell .task-params-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+}
+.task-params-cell .btn { margin-top: 2px; }
 .task-file-size { font-size: 12px; color: var(--text-muted); margin: 2px 0; }
 .task-file-dl { font-size: 12px; color: var(--primary); }
 .task-file-dl.disabled { color: var(--text-muted); }

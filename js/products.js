@@ -177,9 +177,32 @@ async function processAiImage() {
   }
 
   btn.disabled = true; btn.textContent = '处理中...';
-  setAiMsg(msg, '正在调用 processBeadImage 处理...', '');
+  setAiMsg(msg, '正在上传原图到 COS...', '');
   try {
     const imageBase64 = await fileToBase64(file);
+    const materialName = $('#pfName').value.trim();
+    if (!materialName) throw new Error('请先填写商品名称作为素材目录名');
+
+    // 1) 上传原图到 images/materials/<商品名>/ 目录
+    const safeFileName = String(file.name || 'image.png')
+      .replace(/[^a-zA-Z0-9_.\-\u4e00-\u9fa5]/g, '_')
+      .replace(/_{2,}/g, '_');
+    const srcCloudPath = `images/materials/${materialName}/${safeFileName}`;
+    const upRes = await fetch(`${API_BASE}/adminUploadFile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: safeFileName,
+        fileBase64: imageBase64,
+        _adminToken: AUTH_TOKEN,
+        cloudPath: srcCloudPath,
+      }),
+    });
+    const upJson = await upRes.json().catch(() => ({}));
+    if (upJson.code !== 0) throw new Error(upJson.message || '原图上传到 COS 失败');
+
+    // 2) 调用 processBeadImage，传入原图 cloudPath，让云函数把 _card/_assembly 存到同一目录
+    setAiMsg(msg, '正在调用 processBeadImage 处理...', '');
     const res = await apiCall('processBeadImage', {
       imageBase64,
       metadata: {
@@ -188,27 +211,32 @@ async function processAiImage() {
       },
       output: 'both',
       paddingPx: padding,
+      cloudPath: srcCloudPath,
     });
 
-    // 卡片版填入展示图文本框（与 displayImages 字段对齐）
-    if (res.cardImageBase64) {
-      const dataUrl = 'data:image/png;base64,' + res.cardImageBase64;
+    // 3) 优先用返回的 COS fileID 填入展示图；fallback 用临时 dataURL
+    const cardUrl = res.cardFileID || res.cardImageUrl || (res.cardImageBase64 ? 'data:image/png;base64,' + res.cardImageBase64 : '');
+    const assemblyUrl = res.assemblyFileID || res.assemblyImageUrl || (res.assemblyImageBase64 ? 'data:image/png;base64,' + res.assemblyImageBase64 : '');
+
+    if (cardUrl) {
       const ta = $('#pfDisplayImages');
       const existing = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
-      if (!existing.includes(dataUrl)) {
-        existing.push(dataUrl);
+      if (!existing.includes(cardUrl)) {
+        existing.push(cardUrl);
         ta.value = existing.join('\n');
         renderImagePreview('pfDisplayImages', 'pfDisplayImagesPreview');
       }
     }
 
-    // 预览卡片版 + 装配版
+    // 预览卡片版 + 装配版（fileID 需要临时 URL 才能预览，交由 renderImagePreviewUrls 处理）
     preview.innerHTML = '';
-    if (res.cardImageBase64) {
-      preview.innerHTML += `<div><div style="font-size:12px;color:var(--text-light);">卡片版 ${res.cardSize.w}x${res.cardSize.h}</div><img src="data:image/png;base64,${res.cardImageBase64}"></div>`;
+    const cardPreview = res.cardFileID || res.cardImageUrl;
+    const asmPreview = res.assemblyFileID || res.assemblyImageUrl;
+    if (cardPreview) {
+      preview.innerHTML += `<div><div style="font-size:12px;color:var(--text-light);">卡片版 ${res.cardSize.w}x${res.cardSize.h}</div><img src="${cardPreview.startsWith('cloud://') ? '' : cardPreview}" data-fileid="${cardPreview.startsWith('cloud://') ? cardPreview : ''}" onload="if(this.dataset.fileid){resolveImageUrls([this.dataset.fileid]).then(m=>{const u=m.get(this.dataset.fileid);if(u)this.src=u;});}" onerror="this.style.display='none'"></div>`;
     }
-    if (res.assemblyImageBase64) {
-      preview.innerHTML += `<div><div style="font-size:12px;color:var(--text-light);">装配版 ${res.assemblySize.w}x${res.assemblySize.h}</div><img src="data:image/png;base64,${res.assemblyImageBase64}"></div>`;
+    if (asmPreview) {
+      preview.innerHTML += `<div><div style="font-size:12px;color:var(--text-light);">装配版 ${res.assemblySize.w}x${res.assemblySize.h}</div><img src="${asmPreview.startsWith('cloud://') ? '' : asmPreview}" data-fileid="${asmPreview.startsWith('cloud://') ? asmPreview : ''}" onload="if(this.dataset.fileid){resolveImageUrls([this.dataset.fileid]).then(m=>{const u=m.get(this.dataset.fileid);if(u)this.src=u;});}" onerror="this.style.display='none'"></div>`;
     }
 
     const warn = res.warning ? `（${res.warning}）` : '';
@@ -722,16 +750,17 @@ async function uploadFileToCloud(file, onProgress) {
 // 成品 / 配饰共用基础列，配饰额外要求透明图列 + 处理参数列
 const IMPORT_COL_DEFAULTS = {
   product: {
-    colRawName: 'A', colName: 'O', colRawPrice: 'I', colPrice: 'H', colCost: 'G',
+    colRawName: 'A', colName: 'O', colRawPrice: '', colPrice: 'H', colCost: 'G',
     colCategory: 'F', colTagline: 'N',
     colImages: 'X,Y,Z,AA,AB,AC',
     colBeadSize: 'D',
     colElements: 'P', colHome: 'W',
   },
   material: {
-    // 默认列号与业务 Excel 对齐（材料名A / 配饰图片C / 分类D / 零售原价I / 零售现价E / 成本价F /
+    // 默认列号与业务 Excel 对齐（材料名A / 配饰图片C / 分类D / 零售原价(空) / 零售现价E / 成本价F /
     // 横向G / 纵向H / 形状I / 穿线方向J / 穿线宽度K / 是否挂坠L / 五行属M）
-    colRawName: 'A', colName: 'O', colRawPrice: 'I', colPrice: 'E', colCost: 'F',
+    // 配饰AI名、零售原价默认留空：无该列则不填
+    colRawName: 'A', colName: '', colRawPrice: '', colPrice: 'E', colCost: 'F',
     colTransparent: 'C', colCategory: 'D',
     colRealW: 'G', colRealH: 'H', colShape: 'I', colThreadDir: 'J', colThreadWidth: 'K',
     colPendant: 'L',            // 是否挂坠列号：填 TRUE/是/1 表示挂坠（front_back）
@@ -756,7 +785,7 @@ function validateImportForm() {
     );
   } else {
     required.push(
-      'diMColName', 'diMColPrice', 'diMColCost', 'diMColCategory', 'diColTransparent',
+      'diMColPrice', 'diMColCost', 'diMColCategory', 'diColTransparent',
       'diMColRealW', 'diMColRealH', 'diMColShape', 'diMColThreadDir',
       'diMColThreadWidth', 'diMColElements',
     );
@@ -856,12 +885,12 @@ function openImportDocModal() {
       <div class="import-cols import-cols-product">
         <div class="form-row"><label>商品原名列号</label><input id="diColRawName" class="form-input" value="${dp.colRawName}"></div>
         <div class="form-row"><label>商品AI名列号</label><input id="diColName" class="form-input" value="${dp.colName}"></div>
-        <div class="form-row"><label>零售原价列号</label><input id="diColRawPrice" class="form-input" value="${dp.colRawPrice}"></div>
+        <div class="form-row"><label>零售原价列号</label><input id="diColRawPrice" class="form-input" value="${dp.colRawPrice}" placeholder="如果没有，就不填"></div>
         <div class="form-row"><label>零售现价列号</label><input id="diColPrice" class="form-input" value="${dp.colPrice}"></div>
         <div class="form-row"><label>成本价列号</label><input id="diColCost" class="form-input" value="${dp.colCost}" placeholder="单颗/单件成本"></div>
         <div class="form-row"><label>分类列号</label><input id="diColCategory" class="form-input" value="${dp.colCategory}" placeholder="填分类名称"></div>
         <div class="form-row"><label>推荐语列号</label><input id="diColTagline" class="form-input" value="${dp.colTagline}" placeholder="可选；留空由 DS 生成"></div>
-        <div class="form-row"><label>图片列号</label><input id="diColImages" class="form-input" value="${dp.colImages}" placeholder="多列多图逗号分隔；内嵌图按行归位"></div>
+        <div class="form-row"><label>图片URL列号</label><input id="diColImages" class="form-input" value="${dp.colImages}" placeholder="多列多图逗号分隔；内嵌图按行归位"></div>
         <div class="form-row"><label>珠子尺寸列号</label><input id="diColBeadSize" class="form-input" value="${dp.colBeadSize}" placeholder="如 6mm / 8mm"></div>
         <div class="form-row"><label>五行属列号</label><input id="diColElements" class="form-input" value="${dp.colElements}" placeholder="多值逗号分隔"></div>
         <div class="form-row"><label>首页推荐列号</label><input id="diColHome" class="form-input" value="${dp.colHome}" placeholder="TRUE/FALSE"></div>
@@ -870,12 +899,12 @@ function openImportDocModal() {
 
       <div class="import-cols import-cols-material" style="display:none">
         <div class="form-row"><label>配饰原名列号</label><input id="diMColRawName" class="form-input" value="${dm.colRawName}"></div>
-        <div class="form-row"><label>配饰AI名列号</label><input id="diMColName" class="form-input" value="${dm.colName}"></div>
-        <div class="form-row"><label>零售原价列号</label><input id="diMColRawPrice" class="form-input" value="${dm.colRawPrice}"></div>
+        <div class="form-row"><label>配饰AI名列号</label><input id="diMColName" class="form-input" value="${dm.colName}" placeholder="如果没有，就不填"></div>
+        <div class="form-row"><label>零售原价列号</label><input id="diMColRawPrice" class="form-input" value="${dm.colRawPrice}" placeholder="如果没有，就不填"></div>
         <div class="form-row"><label>零售现价列号</label><input id="diMColPrice" class="form-input" value="${dm.colPrice}"></div>
         <div class="form-row"><label>成本价列号</label><input id="diMColCost" class="form-input" value="${dm.colCost}"></div>
         <div class="form-row"><label>分类列号</label><input id="diMColCategory" class="form-input" value="${dm.colCategory}" placeholder="填分类名称"></div>
-        <div class="form-row"><label>配饰图片列号</label><input id="diColTransparent" class="form-input" value="${dm.colTransparent}" placeholder="内嵌透明 PNG 所在列"></div>
+        <div class="form-row"><label>配饰图片URL列号</label><input id="diColTransparent" class="form-input" value="${dm.colTransparent}" placeholder="内嵌透明 PNG 所在列"></div>
         <div class="form-row"><label>横向真实尺寸(mm)列号</label><input id="diMColRealW" class="form-input" value="${dm.colRealW}" placeholder="用于生成规格(横向*纵向)"></div>
         <div class="form-row"><label>纵向真实尺寸(mm)列号</label><input id="diMColRealH" class="form-input" value="${dm.colRealH}" placeholder="圆形仅需横向"></div>
         <div class="form-row"><label>形状列号</label><input id="diMColShape" class="form-input" value="${dm.colShape}" placeholder="如 圆形/圆珠/桶珠/鼓珠"></div>
@@ -973,6 +1002,10 @@ function openImportDocModal() {
         }
         if (summary) summary.style.display = 'none';
 
+        // 防止重复提交
+        btn.disabled = true;
+        btn.textContent = '上传中...';
+
         const supplierId = $('#diSupplier') ? $('#diSupplier').value : '';
         const type = $('#diType').value;
         const docUrl = $('#diDocUrl').value.trim();
@@ -1026,9 +1059,10 @@ function openImportDocModal() {
         // 创建上传任务记录（用于「上传历史」追溯）
         let taskId = '';
         try {
+          const session = getSession();
           const tRes = await apiCall('importTaskManager', {
             action: 'create',
-            account: (AUTH_TOKEN ? 'admin' : ''),
+            account: session.account || session.name || (AUTH_TOKEN ? '管理员' : ''),
             fileName: docUrl,
             fileSize: 0,
             type,
@@ -1320,9 +1354,11 @@ async function startUploadImages() {
 
   $('#uiResult').innerHTML = '';
 
-  // 过滤出图片文件（webkitdirectory 可能带回 .DS_Store 等非图片文件）
-  const imageFiles = files.filter((f) => /^image\//i.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|heic)$/i.test(f.name));
-  if (!imageFiles.length) { showToast('所选目录下未找到图片文件', 'error'); return; }
+  // 仅保留 png/jpg 图片（过滤 .DS_Store 等非图片文件，也排除 gif/webp/bmp/heic 等）
+  const isAllowedImage = (f) => /\.(jpe?g|png)$/i.test(f.name) || /^image\/(jpeg|png)$/i.test(f.type);
+  const imageFiles = files.filter(isAllowedImage);
+  const skipped = files.length - imageFiles.length;
+  if (!imageFiles.length) { showToast(`所选目录下未找到 png/jpg 图片${skipped ? `（已忽略 ${skipped} 个非目标文件）` : ''}`, 'error'); return; }
 
   // 单图体积提示（原图直传，超大图可能受网关限制）
   const tooLarge = imageFiles.filter((f) => f.size > 4 * 1024 * 1024);
@@ -1337,9 +1373,10 @@ async function startUploadImages() {
   // 创建后端任务记录，统一在上传历史页面追溯
   let backendTaskId = '';
   try {
+    const session = getSession();
     const tRes = await apiCall('importTaskManager', {
       action: 'create',
-      account: (AUTH_TOKEN ? 'admin' : ''),
+      account: session.account || session.name || (AUTH_TOKEN ? '管理员' : ''),
       fileName: fileNameText,
       fileSize: totalFileSize,
       type: 'image',
@@ -1536,6 +1573,14 @@ $('#uploadImagesModal').addEventListener('click', (e) => {
   if (e.target === $('#uploadImagesModal')) closeUploadImagesModal();
 });
 $('#uiFileInput').addEventListener('change', (e) => {
-  const n = (e.target.files || []).length;
-  $('#uiFileHint').textContent = n ? `已选择目录（${n} 个文件）` : '未选择目录';
+  const files = Array.from(e.target.files || []);
+  const imageFiles = files.filter((f) => /\.(jpe?g|png)$/i.test(f.name) || /^image\/(jpeg|png)$/i.test(f.type));
+  const skipped = files.length - imageFiles.length;
+  if (!files.length) {
+    $('#uiFileHint').textContent = '未选择目录';
+  } else if (!imageFiles.length) {
+    $('#uiFileHint').textContent = `已选择目录（未找到 png/jpg 图片，共 ${files.length} 个文件）`;
+  } else {
+    $('#uiFileHint').textContent = `已选择目录（${imageFiles.length} 张 png/jpg 图片${skipped ? `，已忽略 ${skipped} 个非目标文件` : ''}）`;
+  }
 });

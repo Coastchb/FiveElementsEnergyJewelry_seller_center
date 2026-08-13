@@ -21,8 +21,9 @@ $('#loginBtn').addEventListener('click', async () => {
   try {
     const data = await apiCall('login', { account, password });
     setToken(data.token);
-    $('#userName').textContent = data.name || '管理员';
-    $('#userAvatar').textContent = (data.name || '管')[0];
+    setSession({ account, name: data.name || '管理员', role: data.role || 'admin' });
+    $('#userName').textContent = account || data.name || '管理员';
+    $('#userAvatar').textContent = ((account || data.name || '管'))[0];
     showApp();
   } catch(e) {
     $('#loginError').textContent = e.message || '登录失败';
@@ -57,6 +58,7 @@ $('#logoutBtn').addEventListener('click', () => {
     if (btn) btn.onclick = () => {
       closeModal();
       setToken('');
+      setSession(null);
       localStorage.removeItem(STORAGE_KEY);
       $('#appPage').style.display = 'none';
       $('#loginPage').style.display = 'flex';
@@ -128,12 +130,13 @@ async function navigateTo(page) {
   if (AUTH_TOKEN) {
     // 验证 token 是否有效
     try {
-      const db = getDB();
-      $('#userName').textContent = db.session.name || '管理员';
-      $('#userAvatar').textContent = (db.session.name || '管')[0];
+      const session = getSession();
+      $('#userName').textContent = session.account || session.name || '管理员';
+      $('#userAvatar').textContent = ((session.account || session.name || '管'))[0];
       showApp();
     } catch(e) {
       setToken('');
+      setSession(null);
     }
   }
 })();

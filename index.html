@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>五行能量饰品馆 · 卖家中心</title>
-<link rel="stylesheet" href="css/style.css?v=2026080616">
+<link rel="stylesheet" href="css/style.css?v=2026081228">
 </head>
 <body>
 <!-- 登录页 -->
@@ -254,7 +254,7 @@
         <div class="filter-group">
           <select id="prodType" class="filter-select">
             <option value="">全部类型</option>
-            <option value="product">成品饰品</option>
+            <option value="product">成品</option>
             <option value="material">配饰</option>
           </select>
           <select id="prodCategory" class="filter-select">
@@ -284,7 +284,7 @@
               <th style="width:40px"><input type="checkbox" id="selectAll"></th>
               <th style="width:220px">商品名称</th>
               <th style="width:60px">类型</th>
-              <th style="width:70px">分类</th>
+              <th style="width:120px">分类名</th>
               <th style="width:80px">价格</th>
               <th style="width:80px">成本价</th>
               <th style="width:70px">库存</th>
@@ -395,16 +395,15 @@
               <th>提交时间</th>
               <th>操作人</th>
               <th>上传类型</th>
-              <th>上传文件</th>
               <th>参数</th>
               <th>结束时间</th>
               <th>状态</th>
               <th>操作</th>
-              <th>日志/参数</th>
+              <th>日志</th>
             </tr>
           </thead>
           <tbody id="taskBody">
-            <tr><td colspan="10" class="empty-state">暂无上传任务</td></tr>
+            <tr><td colspan="9" class="empty-state">暂无上传任务</td></tr>
           </tbody>
         </table>
       </div>
@@ -446,10 +445,10 @@
           <label>商品名称</label><input type="text" id="pfName" class="form-input" required>
         </div>
         <div class="form-row">
-          <label>类型</label><select id="pfProdType" class="form-input"><option value="product">成品饰品</option><option value="material">配饰</option></select>
+          <label>类型</label><select id="pfProdType" class="form-input"><option value="product">成品</option><option value="material">配饰</option></select>
         </div>
         <div class="form-row">
-          <label>分类</label><select id="pfCategory" class="form-input"></select>
+          <label>分类名</label><select id="pfCategory" class="form-input"></select>
         </div>
         <div class="form-row">
           <label>价格 (¥)</label><input type="number" id="pfPrice" class="form-input" step="0.01" min="0" required>
@@ -600,7 +599,7 @@
       <div class="form-row" style="align-items:flex-start;">
         <label style="padding-top:8px;">选择图片目录</label>
         <div style="flex:1;">
-          <input type="file" id="uiFileInput" class="form-input" accept="image/*" webkitdirectory directory multiple>
+          <input type="file" id="uiFileInput" class="form-input" accept=".png,.jpg,.jpeg" webkitdirectory directory multiple>
           <div id="uiFileHint" class="upload-file-hint">未选择目录</div>
         </div>
       </div>
@@ -611,7 +610,7 @@
       <div id="uiResult" class="upload-result"></div>
     </div>
     <div class="modal-footer" id="uploadImagesFooter">
-      <button class="btn btn-outline" id="uploadImagesCancel">取消</button>
+      <button class="btn btn-outline" id="uploadImagesCancel">关闭</button>
       <button class="btn btn-danger" id="uploadImagesTerminate" style="display:none;">终止任务</button>
       <button class="btn btn-primary" id="uploadImagesStart">开始上传</button>
       <button class="btn btn-primary" id="uploadImagesDone" style="display:none;">完成</button>
@@ -622,14 +621,14 @@
 <script>window.__MOCK__ = false;</script>
 <!-- 真实后端域名：在 CloudBase 控制台 → adminLogin 的 HTTP 网关路由里复制，格式为 https://<环境ID>.ap-shanghai.app.tcloudbase.com，不要带 /adminLogin（前端会自动拼接） -->
 <script>window.__API_BASE__ = 'https://cloud1-d8gspzw1m242c79ce-1460636638.ap-shanghai.app.tcloudbase.com';</script>
-  <script src="js/api.js?v=2026080910"></script>
+  <script src="js/api.js?v=2026081227"></script>
   <script src="js/utils.js?v=2026080910"></script>
   <script src="js/dashboard.js?v=2026080910"></script>
   <script src="js/orders.v2.js?v=2026080910"></script>
-  <script src="js/products.js?v=2026081110"></script>
+  <script src="js/products.js?v=2026081228"></script>
   <script src="js/users.js?v=2026080910"></script>
   <script src="js/dbview.js?v=2026080910"></script>
-  <script src="js/taskhistory.js?v=2026081110"></script>
-  <script src="js/app.js?v=2026080910"></script>
+  <script src="js/taskhistory.js?v=2026081226"></script>
+  <script src="js/app.js?v=2026081228"></script>
 </body>
 </html>

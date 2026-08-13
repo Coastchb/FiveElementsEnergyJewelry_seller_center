@@ -42,6 +42,13 @@ function fmtTaskTime(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+function splitTaskTime(ts) {
+  const text = fmtTaskTime(ts);
+  if (text === '-') return ['', ''];
+  const [date, time] = text.split(' ');
+  return [date, time];
+}
+
 function fmtFileSize(bytes) {
   if (!bytes) return '-';
   if (bytes < 1024) return bytes + ' B';
@@ -52,17 +59,26 @@ function fmtFileSize(bytes) {
 
 function statusBadge(task) {
   const status = task && task.status;
-  const cls = 'task-status task-status-' + (status || 'pending');
   const text = resolveTaskStatusText(task);
+  // 部分成功也按失败级别标红，和全部失败保持一致
+  const clsSuffix = (status === 'success' && text === '部分成功') ? 'failed' : (status || 'pending');
+  const cls = 'task-status task-status-' + clsSuffix;
   return `<span class="${cls}">${text}</span>`;
 }
 
 function fmtParams(params) {
   if (!params || typeof params !== 'object') return '-';
-  const entries = Object.entries(params)
-    .filter(([, v]) => v !== '' && v != null)
-    .map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(String(v))}`);
-  return entries.length ? entries.join(' / ') : '-';
+  // 列表中只显示最关键的几项，避免参数过多把表格撑宽；完整参数点击“查看参数”弹窗
+  const priority = ['type', 'maxCount', 'thicknessMm', 'colPrice', 'colCost'];
+  const parts = [];
+  for (const k of priority) {
+    if (params[k] !== '' && params[k] != null) {
+      parts.push(`${escapeHtml(k)}: ${escapeHtml(String(params[k]))}`);
+    }
+  }
+  let text = parts.length ? parts.join(' / ') : `已配置 ${Object.keys(params).filter((k) => params[k] !== '' && params[k] != null).length} 项`;
+  if (text.length > 55) text = text.slice(0, 55) + '…';
+  return text;
 }
 
 function fmtParamsFull(params) {
@@ -90,38 +106,33 @@ function stopTaskPolling() {
 
 async function loadTaskHistory() {
   const body = $('#taskBody');
-  if (body) body.innerHTML = '<tr><td colspan="10" class="empty-state">加载中...</td></tr>';
+  if (body) body.innerHTML = '<tr><td colspan="9" class="empty-state">加载中...</td></tr>';
   try {
     const res = await apiCall('importTaskManager', { action: 'list', limit: 50 });
     const list = (res && res.list) || [];
     if (!list.length) {
-      if (body) body.innerHTML = '<tr><td colspan="10" class="empty-state">暂无上传任务</td></tr>';
+      if (body) body.innerHTML = '<tr><td colspan="9" class="empty-state">暂无上传任务</td></tr>';
       stopTaskPolling();
       return;
     }
     if (body) {
       body.innerHTML = list.map((t) => {
         const canTerminate = t.status === 'pending' || t.status === 'running' || t.status === 'uploading';
+        const [createDate, createTime] = splitTaskTime(t.createdAt);
+        const [finishDate, finishTime] = splitTaskTime(t.finishedAt);
         return `
         <tr>
-          <td><code>${escapeHtml(t.taskId)}</code></td>
-          <td>${fmtTaskTime(t.createdAt)}</td>
+          <td class="task-id-cell"><code>${escapeHtml(t.taskId)}</code></td>
+          <td class="task-time-cell"><div class="task-date">${createDate}</div><div class="task-clock">${createTime}</div></td>
           <td>${escapeHtml(t.account || '-')}</td>
           <td>${TASK_TYPE_TEXT[t.type] || (t.type === 'product' ? '成品' : '配饰')}</td>
-          <td>
-            <div class="task-file">
-              <div class="task-file-name" title="${escapeHtml(t.fileName || '')}">${escapeHtml(t.fileName || '-')}</div>
-              <div class="task-file-size">${fmtFileSize(t.fileSize)}</div>
-              ${t.fileUrl ? `<a class="task-file-dl" href="${escapeHtml(t.fileUrl)}" target="_blank" rel="noopener">下载</a>` : '<span class="task-file-dl disabled">暂不可用</span>'}
-            </div>
-          </td>
-          <td>
+          <td class="task-params-cell">
             <button class="btn btn-sm btn-outline" data-task-param="${escapeHtml(t.taskId)}">查看参数</button>
           </td>
-          <td>${fmtTaskTime(t.finishedAt)}</td>
+          <td class="task-time-cell">${finishDate ? `<div class="task-date">${finishDate}</div><div class="task-clock">${finishTime}</div>` : '-'}</td>
           <td>${statusBadge(t)}</td>
-          <td>
-            ${canTerminate ? `<button class="btn btn-sm btn-danger" data-task-terminate="${escapeHtml(t.taskId)}" data-task-type="${escapeHtml(t.type || '')}">终止任务</button>` : '<span class="task-op-disabled">—</span>'}
+          <td class="task-ops">
+            ${canTerminate ? `<button class="btn btn-sm btn-danger" data-task-terminate="${escapeHtml(t.taskId)}" data-task-type="${escapeHtml(t.type || '')}">终止任务</button>` : ''}
           </td>
           <td>
             <button class="btn btn-sm btn-outline" data-task-log="${escapeHtml(t.taskId)}">查看日志</button>
@@ -144,7 +155,7 @@ async function loadTaskHistory() {
     if (hasRunning) startTaskPolling();
     else stopTaskPolling();
   } catch (e) {
-    if (body) body.innerHTML = `<tr><td colspan="10" class="empty-state">加载失败：${escapeHtml(e.message)}</td></tr>`;
+    if (body) body.innerHTML = `<tr><td colspan="9" class="empty-state">加载失败：${escapeHtml(e.message)}</td></tr>`;
     stopTaskPolling();
   }
 }
@@ -183,7 +194,9 @@ async function showTaskLog(taskId) {
     if (!task) { showToast('任务不存在', 'error'); return; }
     const logs = (task.logs || []).map((l) => `<div class="log-line">${escapeHtml(l)}</div>`).join('') || '<div class="log-line">无日志</div>';
     let resultText = '';
-    if (task.result) {
+    // 仅任务已结束时展示汇总，避免运行中的空 result 误导用户以为已结束
+    const isFinished = ['success', 'failed', 'cancelled'].includes(task.status);
+    if (isFinished && task.result) {
       const failList = Array.isArray(task.result.failList) ? task.result.failList : [];
       const failHtml = failList.length
         ? `<div style="margin-top:8px;color:#C0392B;"><strong>失败明细：</strong></div>` +
