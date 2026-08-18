@@ -322,14 +322,10 @@ function renderOrderList(container, list, type) {
       adminHtml += `<button class="btn btn-outline" onclick="onCancelOrder('${o.orderId}', 'cancel')">取消订单</button>`;
     } else if (['待发货', '运输中', '已完成'].includes(o.status)) {
       adminHtml += `<button class="btn btn-danger" onclick="onApplyRefund('${o.orderId}')">退换货</button>`;
-      adminHtml += `<button class="btn btn-danger" onclick="onConfirmRefund('${o.orderId}')">立即退款</button>`;
-      adminHtml += `<button class="btn btn-outline" onclick="onCompensate('${o.orderId}')">补差价</button>`;
     } else if (o.status === '待退款') {
-      adminHtml = `<button class="btn btn-danger" disabled>退换货</button>`;
-      adminHtml += `<button class="btn btn-danger" onclick="onConfirmRefund('${o.orderId}')">立即退款</button>`;
-      adminHtml += `<button class="btn btn-outline" onclick="onCompensate('${o.orderId}')">补差价</button>`;
+      adminHtml = `<button class="btn btn-danger" disabled>退换货</button><button class="btn btn-primary" onclick="onMarkRefunded('${o.orderId}')">已退款</button>`;
     } else if (o.status === '已退款') {
-      adminHtml = `<button class="btn btn-danger" disabled>退换货</button><button class="btn btn-danger" disabled>退款</button>`;
+      adminHtml = `<button class="btn btn-danger" disabled>退换货</button>`;
     } else if (o.status === '已支付') {
       // 虚假超时订单：实际已支付，但状态机未转正
       const hasWaybill = !!(o.waybillNo || o.waybillId || (o.waybill && (o.waybill.waybillId || o.waybill.trackingNo)));
@@ -364,7 +360,6 @@ function renderOrderList(container, list, type) {
       <div class="order-card-head">
         <span class="order-seq">编号：${o.orderId.slice(-4)}</span>
         <span class="order-status ${statusClass}">${o.status}</span>
-        ${o.status === '已退款' ? '<span class="refund-tag">已退款</span>' : ''}
         ${hasPayError ? '<span class="refund-tag pay-err-tag">支付异常</span>' : ''}
       </div>
       ${hasWaybillError ? `
@@ -391,6 +386,8 @@ function renderOrderList(container, list, type) {
       </div>
       <div class="order-info">
         <div class="order-info-no">订单号：${o.orderId}<button type="button" class="copy-no-btn" onclick="onCopyOrderId('${o.orderId}', this)">复制</button></div>
+        ${o.transactionId ? `<div class="order-info-no">微信单号：${o.transactionId}<button type="button" class="copy-no-btn" onclick="onCopyOrderId('${o.transactionId}', this)">复制</button></div>` : ''}
+        ${o.outTradeNo ? `<div class="order-info-no">商户单号：${o.outTradeNo}<button type="button" class="copy-no-btn" onclick="onCopyOrderId('${o.outTradeNo}', this)">复制</button></div>` : ''}
         <div>下单：${createdAtText}</div>
         <div>用户：${o.nickname || ''}</div>
         <div>收货：${(o.address && o.address.name) || ''} ${(o.address && o.address.phone) || ''}</div>
@@ -884,6 +881,33 @@ async function onConfirmRefund(orderId) {
         showToast(ns || '已退款', 'success');
         await reloadOrders();
       } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+    };
+  }, 50);
+}
+
+// ========== 标记已退款（微信平台手动退款后，仅同步状态）==========
+// 适用场景：退款实际已在微信支付商户平台完成，卖家中心只需把「待退款」→「已退款」同步状态
+async function onMarkRefunded(orderId) {
+  const order = _orderCache.find(o => o.orderId === orderId);
+  if (!order) { showToast('订单不存在', 'error'); return; }
+  if (order.status !== '待退款') { showToast('仅「待退款」订单可执行此操作', 'error'); return; }
+  showModal('标记为已退款', `
+    <p style="text-align:center;line-height:2;">确认已在微信支付平台完成退款？</p>
+    <p style="text-align:center;color:#8A8079;font-size:13px;">订单将转为「已退款」（仅同步状态，不会再次发起退款）。</p>
+    <p style="text-align:center;color:#8A8079;font-size:13px;">订单号：${orderId}</p>
+  `, `
+    <button class="btn btn-primary" id="markRefundedBtn">确认已退款</button>
+    <button class="btn btn-outline" onclick="closeModal()">取消</button>
+  `);
+  setTimeout(() => {
+    const btn = $('#markRefundedBtn');
+    if (btn) btn.onclick = async () => {
+      closeModal();
+      try {
+        await apiCall('adminUpdateOrder', { orderId, action: 'refund', markOnly: true });
+        showToast('已标记为「已退款」', 'success');
+        await reloadOrders();
+      } catch (e) { showToast('操作失败: ' + e.message, 'error'); }
     };
   }, 50);
 }
