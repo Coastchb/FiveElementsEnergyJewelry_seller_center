@@ -754,6 +754,7 @@ const IMPORT_COL_DEFAULTS = {
     colCategory: 'F', colTagline: 'N',
     colImages: 'X,Y,Z,AA,AB,AC',
     colBeadSize: 'D',
+    colMaterial: 'E',
     colElements: 'P', colHome: 'W',
   },
   material: {
@@ -892,6 +893,7 @@ function openImportDocModal() {
         <div class="form-row"><label>推荐语列号</label><input id="diColTagline" class="form-input" value="${dp.colTagline}" placeholder="可选；留空由 DS 生成"></div>
         <div class="form-row"><label>图片URL列号</label><input id="diColImages" class="form-input" value="${dp.colImages}" placeholder="多列多图逗号分隔；内嵌图按行归位"></div>
         <div class="form-row"><label>珠子尺寸列号</label><input id="diColBeadSize" class="form-input" value="${dp.colBeadSize}" placeholder="如 6mm / 8mm"></div>
+        <div class="form-row"><label>材料属性列号</label><input id="diColMaterial" class="form-input" value="${dp.colMaterial}" placeholder="如 天然红胶花"></div>
         <div class="form-row"><label>五行属列号</label><input id="diColElements" class="form-input" value="${dp.colElements}" placeholder="多值逗号分隔"></div>
         <div class="form-row"><label>首页推荐列号</label><input id="diColHome" class="form-input" value="${dp.colHome}" placeholder="TRUE/FALSE"></div>
         <div class="form-row"><label>库存列号</label><input id="diColStock" class="form-input" value="暂时不填，库存管够" readonly disabled></div>
@@ -1028,6 +1030,7 @@ function openImportDocModal() {
             colCategory: $('#diColCategory').value.trim(),
             colImages: $('#diColImages').value.trim(),
             colBeadSize: $('#diColBeadSize').value.trim(),
+            colMaterial: $('#diColMaterial').value.trim(),
             colTagline: $('#diColTagline').value.trim(),
             colElements: $('#diColElements').value.trim(),
             colHome: $('#diColHome').value.trim(),
